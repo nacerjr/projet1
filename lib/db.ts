@@ -9,6 +9,7 @@ export interface Tournament {
   format: 'Single Elimination' | 'Double Elimination' | 'Round Robin';
   bracket: Match[];
   winner?: string;
+  runner_up?: string;
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
@@ -50,10 +51,19 @@ export async function loadActiveTournament(): Promise<Tournament | null> {
   }
 }
 
-export async function loadHistoricalTournaments(): Promise<Tournament[]> {
+export async function loadHistoricalTournaments(): Promise<any[]> {
   try {
-    const tournaments = await getTournaments();
-    return tournaments as Tournament[];
+    const { data, error } = await supabase
+      .from('historical_tournaments')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading historical tournaments:', error);
+      return [];
+    }
+
+    return data || [];
   } catch (error) {
     console.error('Error loading historical tournaments:', error);
     return [];
@@ -62,7 +72,6 @@ export async function loadHistoricalTournaments(): Promise<Tournament[]> {
 
 export async function createNewTournament(tournament: Tournament): Promise<Tournament> {
   try {
-    // Mark all other tournaments as inactive
     const tournaments = await getTournaments();
     for (const t of tournaments) {
       if (t.is_active) {
@@ -70,7 +79,6 @@ export async function createNewTournament(tournament: Tournament): Promise<Tourn
       }
     }
 
-    // Create new tournament
     const created = await createTournament({
       ...tournament,
       is_active: true,
@@ -95,10 +103,18 @@ export async function updateCurrentTournament(tournament: Tournament): Promise<T
 
 export async function finalizeTournament(tournament: Tournament): Promise<void> {
   try {
-    // Save to history
-    await saveTournamentToHistory(tournament);
+    // Detect runner_up from the final match
+    let runner_up = tournament.runner_up;
+    if (!runner_up) {
+      const finalMatch = tournament.bracket.find((m) => !m.nextMatchId);
+      if (finalMatch && finalMatch.completed) {
+        runner_up = (finalMatch.scoreA[0] > finalMatch.scoreB[0]
+          ? finalMatch.playerB
+          : finalMatch.playerA) ?? undefined;
+      }
+    }
 
-    // Mark as inactive
+    await saveTournamentToHistory({ ...tournament, runner_up });
     await updateTournament(tournament.id, { is_active: false });
   } catch (error) {
     console.error('Error finalizing tournament:', error);
@@ -156,8 +172,6 @@ export async function ensurePlayerExists(name: string): Promise<Player> {
     if (existing) {
       return existing as Player;
     }
-
-    // Create new player automatically
     return await createNewPlayer(name);
   } catch (error) {
     console.error('Error ensuring player exists:', error);

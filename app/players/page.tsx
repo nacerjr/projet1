@@ -9,7 +9,7 @@ import { Trophy, Award } from 'lucide-react';
 
 export default function PlayersPage() {
   const [players, setPlayers] = useState<Player[]>([]);
-  const [historicalTournaments, setHistoricalTournaments] = useState<Tournament[]>([]);
+  const [historicalTournaments, setHistoricalTournaments] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'ranking' | 'editions'>('ranking');
   const [mounted, setMounted] = useState(false);
 
@@ -28,8 +28,9 @@ export default function PlayersPage() {
 
   if (!mounted) return null;
 
+  // Show any player who has at least 1 trophy OR 1 final appearance
   const sortedPlayers = [...players]
-    .filter((p) => p.trophies > 0)
+    .filter((p) => p.trophies > 0 || p.second_place > 0)
     .sort((a, b) => {
       if (b.trophies !== a.trophies) return b.trophies - a.trophies;
       return b.second_place - a.second_place;
@@ -126,13 +127,26 @@ export default function PlayersPage() {
                   <p className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
                     {tournament.name}
                   </p>
-                  <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    {tournament.date && new Date(tournament.date).toLocaleDateString()}
+                  <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+                    {tournament.format} · {tournament.size} players
+                    {tournament.date && ` · ${new Date(tournament.date).toLocaleDateString()}`}
                   </p>
+
+                  {/* Winner */}
                   {tournament.winner && (
-                    <div className="flex items-center gap-2" style={{ color: 'var(--gold)' }}>
+                    <div className="flex items-center gap-2 mb-1" style={{ color: 'var(--gold)' }}>
                       <Trophy size={16} />
-                      <span className="text-sm font-semibold">{tournament.winner}</span>
+                      <span className="text-sm font-bold">{tournament.winner}</span>
+                      <span className="text-xs font-normal" style={{ color: 'var(--text-secondary)' }}>Winner</span>
+                    </div>
+                  )}
+
+                  {/* Runner-up */}
+                  {tournament.runner_up && (
+                    <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                      <span className="text-base">🥈</span>
+                      <span className="text-sm font-semibold">{tournament.runner_up}</span>
+                      <span className="text-xs">Runner-up</span>
                     </div>
                   )}
                 </div>

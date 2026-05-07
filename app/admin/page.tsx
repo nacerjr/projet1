@@ -8,6 +8,7 @@ import { ThemeToggle } from '@/components/ThemeProvider';
 import { generateBracket } from '@/lib/bracket';
 import { v4 as uuidv4 } from 'uuid';
 import { Trophy, Trash2, Check, History } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function AdminPage() {
   const router = useRouter();
@@ -204,7 +205,6 @@ function ResultsEntry() {
 
   const handleScoreChange = (matchId: string, player: 'A' | 'B', value: string) => {
     if (!tournament) return;
-    // Allow empty string while typing, parse to number on blur/save
     const score = value === '' ? 0 : Math.max(0, parseInt(value) || 0);
     setTournament({
       ...tournament,
@@ -236,23 +236,18 @@ function ResultsEntry() {
     );
 
     if (match.nextMatchId) {
-      // Always clear the slot this match previously filled in the next match
-      // then re-fill if completing
       const prevWinner = match.scoreA[0] > match.scoreB[0] ? match.playerA : match.playerB;
       const prevLoser  = match.scoreA[0] > match.scoreB[0] ? match.playerB : match.playerA;
 
       updatedBracket = updatedBracket.map((m) => {
         if (m.id !== match.nextMatchId) return m;
-        // Remove the old winner from whichever slot it occupies
         let pA = m.playerA === prevWinner ? null : m.playerA;
         let pB = m.playerB === prevWinner ? null : m.playerB;
-        // Also clear loser just in case of accidental fill
         if (pA === prevLoser) pA = null;
         if (pB === prevLoser) pB = null;
 
         if (completing) {
           const newWinner = match.scoreA[0] > match.scoreB[0] ? match.playerA : match.playerB;
-          // Fill first empty slot
           if (pA === null || pA === '') pA = newWinner;
           else if (pB === null || pB === '') pB = newWinner;
         }
@@ -336,7 +331,6 @@ function ResultsEntry() {
                     {match.completed && <span className="text-xs font-bold" style={{ color: 'var(--gold)' }}>✓ Done</span>}
                   </div>
 
-                  {/* Player A */}
                   <div className="flex items-center gap-3">
                     <span className="flex-1 text-sm font-medium truncate">{match.playerA || 'TBD'}</span>
                     <input
@@ -348,7 +342,6 @@ function ResultsEntry() {
                       style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--gold)' }} />
                   </div>
 
-                  {/* Player B */}
                   <div className="flex items-center gap-3">
                     <span className="flex-1 text-sm font-medium truncate">{match.playerB || 'TBD'}</span>
                     <input
@@ -360,7 +353,6 @@ function ResultsEntry() {
                       style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--gold)' }} />
                   </div>
 
-                  {/* Stream link */}
                   <input type="text" value={match.streamLink || ''} onChange={(e) => handleStreamLinkChange(match.id, e.target.value)}
                     placeholder="Stream link (optional)"
                     className="w-full rounded px-2 py-1 text-xs"
@@ -511,7 +503,6 @@ function FinishTournament() {
       await db.updateCurrentTournament(updated);
       await db.finalizeTournament(updated);
       await db.incrementPlayerWins(finalWinner);
-      // Find runner-up (loser of final)
       const finalMatch = tournament.bracket.find((m) => !m.nextMatchId);
       if (finalMatch) {
         const runnerUp = finalMatch.scoreA[0] > finalMatch.scoreB[0] ? finalMatch.playerB : finalMatch.playerA;
@@ -581,53 +572,120 @@ function FinishTournament() {
 function HistoryManagement() {
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
-      // Query the historical_tournaments table directly (separate from active tournaments)
-      const { supabase } = await import('@/lib/supabase');
-      const { data, error } = await supabase
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('historical_tournaments')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data) setTournaments(data);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}" from history? This cannot be undone.`)) return;
+    setDeletingId(id);
+    try {
+      const { error } = await supabase
         .from('historical_tournaments')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (!error && data) setTournaments(data);
-      setLoading(false);
-    };
-    load();
-  }, []);
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      setTournaments((prev) => prev.filter((t) => t.id !== id));
+    } catch {
+      alert('Error deleting tournament');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!confirm('Delete ALL historical tournaments? This cannot be undone.')) return;
+    setResetting(true);
+    try {
+      const { error } = await supabase
+        .from('historical_tournaments')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // delete all rows
+      if (error) throw error;
+      setTournaments([]);
+    } catch {
+      alert('Error resetting history');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   if (loading) return <div className="text-center py-8">Loading history...</div>;
-  if (tournaments.length === 0) return (
-    <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>
-      No finished tournaments yet. Use "Finish" to archive a tournament.
-    </div>
-  );
 
   return (
     <div className="space-y-4">
-      {tournaments.map((t) => (
-        <div key={t.id} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{t.name}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                {t.format} · {t.size} players
-                {t.date && ` · ${new Date(t.date).toLocaleDateString()}`}
-              </p>
-            </div>
-            <History size={16} style={{ color: 'var(--text-secondary)' }} />
-          </div>
-          {t.winner && (
-            <div className="flex items-center gap-2 mt-3" style={{ color: 'var(--gold)' }}>
-              <Trophy size={16} />
-              <span className="font-semibold text-sm">{t.winner}</span>
-            </div>
-          )}
-          <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-            {t.bracket?.filter((m: any) => m.completed).length ?? 0}/{t.bracket?.length ?? 0} matches played
-          </p>
+      {/* Reset All button */}
+      {tournaments.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleResetAll}
+            disabled={resetting}
+            className="flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm"
+            style={{ backgroundColor: '#dc2626', color: 'white', cursor: resetting ? 'not-allowed' : 'pointer', opacity: resetting ? 0.7 : 1 }}>
+            <Trash2 size={14} />
+            {resetting ? 'Resetting...' : 'Reset All History'}
+          </button>
         </div>
-      ))}
+      )}
+
+      {tournaments.length === 0 ? (
+        <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>
+          No finished tournaments yet. Use "Finish" to archive a tournament.
+        </div>
+      ) : (
+        tournaments.map((t) => (
+          <div key={t.id} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="font-bold truncate" style={{ color: 'var(--text-primary)' }}>{t.name}</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                  {t.format} · {t.size} players
+                  {t.date && ` · ${new Date(t.date).toLocaleDateString()}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <History size={16} style={{ color: 'var(--text-secondary)' }} />
+                <button
+                  onClick={() => handleDelete(t.id, t.name)}
+                  disabled={deletingId === t.id}
+                  className="p-1.5 rounded"
+                  style={{ backgroundColor: '#dc2626', color: 'white', cursor: deletingId === t.id ? 'not-allowed' : 'pointer', opacity: deletingId === t.id ? 0.7 : 1 }}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+
+            {t.winner && (
+              <div className="flex items-center gap-2 mt-3" style={{ color: 'var(--gold)' }}>
+                <Trophy size={16} />
+                <span className="font-semibold text-sm">{t.winner}</span>
+              </div>
+            )}
+
+            {t.runner_up && (
+              <div className="flex items-center gap-2 mt-1" style={{ color: 'var(--text-secondary)' }}>
+                <span className="text-sm">🥈</span>
+                <span className="font-semibold text-sm">{t.runner_up}</span>
+              </div>
+            )}
+
+            <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+              {t.bracket?.filter((m: any) => m.completed).length ?? 0}/{t.bracket?.length ?? 0} matches played
+            </p>
+          </div>
+        ))
+      )}
     </div>
   );
 }

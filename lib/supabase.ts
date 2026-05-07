@@ -17,6 +17,7 @@ export interface Tournament {
   format: string;
   bracket: any[];
   winner?: string;
+  runner_up?: string;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -95,7 +96,7 @@ export async function updateTournament(id: string, updates: Partial<Tournament>)
   return data;
 }
 
-export async function saveTournamentToHistory(tournament: Tournament) {
+export async function saveTournamentToHistory(tournament: Tournament & { runner_up?: string }) {
   const { data, error } = await supabase
     .from('historical_tournaments')
     .insert([{
@@ -106,6 +107,7 @@ export async function saveTournamentToHistory(tournament: Tournament) {
       format: tournament.format,
       bracket: tournament.bracket,
       winner: tournament.winner,
+      runner_up: tournament.runner_up ?? null,
     }])
     .select()
     .single();
@@ -174,7 +176,6 @@ export async function updatePlayer(id: string, updates: Partial<Player>) {
 }
 
 export async function upsertPlayer(player: Player) {
-  // Try to get existing player
   const existing = await getPlayer(player.name);
   
   if (existing) {
