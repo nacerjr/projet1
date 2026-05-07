@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getStorage, Tournament } from '@/lib/storage';
+import { loadActiveTournament, loadHistoricalTournaments } from '@/lib/db';
+import { Tournament } from '@/lib/db';
 import BottomNav from '@/components/BottomNav';
 import BracketView from '@/components/BracketView';
 import HistoricalTournaments from '@/components/HistoricalTournaments';
@@ -10,18 +11,21 @@ import { ThemeToggle } from '@/components/ThemeProvider';
 import { Clock } from 'lucide-react';
 
 export default function BracketPage() {
-  const [currentTournament, setCurrentTournament] = useState<Tournament | null>(
-    null
-  );
-  const [historicalTournaments, setHistoricalTournaments] = useState<
-    Tournament[]
-  >([]);
+  const [currentTournament, setCurrentTournament] = useState<Tournament | null>(null);
+  const [historicalTournaments, setHistoricalTournaments] = useState<Tournament[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setCurrentTournament(getStorage('currentTournament'));
-    setHistoricalTournaments(getStorage('historicalTournaments'));
-    setMounted(true);
+    const load = async () => {
+      const [active, historical] = await Promise.all([
+        loadActiveTournament(),
+        loadHistoricalTournaments(),
+      ]);
+      setCurrentTournament(active);
+      setHistoricalTournaments(historical);
+      setMounted(true);
+    };
+    load();
   }, []);
 
   if (!mounted) return null;
@@ -64,9 +68,7 @@ export default function BracketPage() {
             <p className="text-center" style={{ color: 'var(--text-secondary)' }}>No tournament configured</p>
           </div>
         ) : (
-          <>
-            <BracketView tournament={currentTournament} />
-          </>
+          <BracketView tournament={currentTournament} />
         )}
 
         {historicalTournaments.length > 0 && (

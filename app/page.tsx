@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getStorage } from '@/lib/storage';
+import { loadBackgroundImage } from '@/lib/db';
 import BottomNav from '@/components/BottomNav';
 
 export default function Home() {
@@ -9,8 +9,12 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setBackgroundImage(getStorage('backgroundImage') || '/tournament-bg.jpg');
-    setMounted(true);
+    const load = async () => {
+      const img = await loadBackgroundImage();
+      setBackgroundImage(img || '/tournament-bg.jpg');
+      setMounted(true);
+    };
+    load();
   }, []);
 
   if (!mounted) return null;
@@ -32,8 +36,6 @@ export default function Home() {
 
       {/* Bottom Gradient Overlay */}
       <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black via-black/50 to-transparent" />
-
-
 
       {/* Bottom Navigation */}
       <BottomNav />

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getStorage } from '@/lib/storage';
+import { loadWhatsappLink } from '@/lib/db';
 import BottomNav from '@/components/BottomNav';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { MessageCircle } from 'lucide-react';
@@ -11,8 +11,12 @@ export default function ContactPage() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setWhatsappLink(getStorage('whatsappLink'));
-    setMounted(true);
+    const load = async () => {
+      const link = await loadWhatsappLink();
+      setWhatsappLink(link || '');
+      setMounted(true);
+    };
+    load();
   }, []);
 
   if (!mounted) return null;

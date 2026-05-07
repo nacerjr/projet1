@@ -1,32 +1,38 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getStorage, Player, Tournament } from '@/lib/storage';
+import { loadPlayers, loadHistoricalTournaments } from '@/lib/db';
+import { Player, Tournament } from '@/lib/db';
 import BottomNav from '@/components/BottomNav';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { Trophy, Award } from 'lucide-react';
 
 export default function PlayersPage() {
   const [players, setPlayers] = useState<Player[]>([]);
-  const [historicalTournaments, setHistoricalTournaments] = useState<
-    Tournament[]
-  >([]);
+  const [historicalTournaments, setHistoricalTournaments] = useState<Tournament[]>([]);
   const [activeTab, setActiveTab] = useState<'ranking' | 'editions'>('ranking');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setPlayers(getStorage('players'));
-    setHistoricalTournaments(getStorage('historicalTournaments'));
-    setMounted(true);
+    const load = async () => {
+      const [playersData, historicalData] = await Promise.all([
+        loadPlayers(),
+        loadHistoricalTournaments(),
+      ]);
+      setPlayers(playersData);
+      setHistoricalTournaments(historicalData);
+      setMounted(true);
+    };
+    load();
   }, []);
 
   if (!mounted) return null;
 
   const sortedPlayers = [...players]
-    .filter((p) => p.wins > 0) // Only show players with at least 1 trophy
+    .filter((p) => p.trophies > 0)
     .sort((a, b) => {
-      if (b.wins !== a.wins) return b.wins - a.wins;
-      return b.finals - a.finals;
+      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+      return b.second_place - a.second_place;
     });
 
   return (
@@ -41,11 +47,7 @@ export default function PlayersPage() {
         <div className="flex gap-2 mb-6" style={{ borderBottom: '1px solid var(--border-color)' }}>
           <button
             onClick={() => setActiveTab('ranking')}
-            className={`pb-3 px-2 font-semibold transition-colors ${
-              activeTab === 'ranking'
-                ? 'border-b-2'
-                : ''
-            }`}
+            className={`pb-3 px-2 font-semibold transition-colors ${activeTab === 'ranking' ? 'border-b-2' : ''}`}
             style={{
               color: activeTab === 'ranking' ? 'var(--gold)' : 'var(--text-secondary)',
               borderBottomColor: 'var(--gold)'
@@ -55,11 +57,7 @@ export default function PlayersPage() {
           </button>
           <button
             onClick={() => setActiveTab('editions')}
-            className={`pb-3 px-2 font-semibold transition-colors ${
-              activeTab === 'editions'
-                ? 'border-b-2'
-                : ''
-            }`}
+            className={`pb-3 px-2 font-semibold transition-colors ${activeTab === 'editions' ? 'border-b-2' : ''}`}
             style={{
               color: activeTab === 'editions' ? 'var(--gold)' : 'var(--text-secondary)',
               borderBottomColor: 'var(--gold)'
@@ -93,14 +91,14 @@ export default function PlayersPage() {
                     <div className="flex flex-col items-center">
                       <Trophy size={18} className="mb-1" style={{ color: 'var(--gold)' }} />
                       <span className="text-sm font-bold" style={{ color: 'var(--gold)' }}>
-                        {player.wins}
+                        {player.trophies}
                       </span>
                       <span className="text-xs">🏆</span>
                     </div>
                     <div className="flex flex-col items-center">
                       <Award size={18} className="mb-1" style={{ color: 'var(--text-secondary)' }} />
                       <span className="text-sm font-bold" style={{ color: 'var(--text-secondary)' }}>
-                        {player.finals}
+                        {player.second_place}
                       </span>
                       <span className="text-xs">🥈</span>
                     </div>
@@ -129,15 +127,12 @@ export default function PlayersPage() {
                     {tournament.name}
                   </p>
                   <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    {tournament.date &&
-                      new Date(tournament.date).toLocaleDateString()}
+                    {tournament.date && new Date(tournament.date).toLocaleDateString()}
                   </p>
                   {tournament.winner && (
                     <div className="flex items-center gap-2" style={{ color: 'var(--gold)' }}>
                       <Trophy size={16} />
-                      <span className="text-sm font-semibold">
-                        {tournament.winner}
-                      </span>
+                      <span className="text-sm font-semibold">{tournament.winner}</span>
                     </div>
                   )}
                 </div>
