@@ -7,7 +7,7 @@ import { Tournament, Match, Player, getSingleMatchWinner, getDoubleElimWinner, g
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { generateBracket } from '@/lib/bracket';
 import { v4 as uuidv4 } from 'uuid';
-import { Trophy, Trash2, Check, History, AlertTriangle } from 'lucide-react';
+import { Trophy, Trash2, Check, History, AlertTriangle, RotateCcw } from 'lucide-react';
 import { supabase, resetAllData } from '@/lib/supabase';
 
 export default function AdminPage() {
@@ -267,7 +267,7 @@ function TournamentSetup() {
               <input type="radio" name="format" value={f} checked={format === f} onChange={() => setFormat(f)} className="w-4 h-4" />
               <span className="text-sm">
                 {f === 'Single Elimination' && '🏆 Single Elimination — le gagnant avance'}
-                {f === 'Double Elimination' && '🔄 Double Elimination — aller + retour (barrage si agrégat nul)'}
+                {f === 'Double Elimination' && '🔄 Double Elimination — aller + retour (barrage si agrégat égal)'}
                 {f === 'Best of 3' && '3️⃣ Best of 3 — gagne 2/3 matchs pour passer'}
               </span>
             </label>
@@ -313,6 +313,18 @@ function ResultsEntry() {
     });
   };
 
+  // Bulk update multiple matches at once (needed for winner propagation)
+  const updateMatches = (updatesMap: Record<string, Partial<Match>>) => {
+    if (!tournament) return;
+    setTournament(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        bracket: prev.bracket.map(m => updatesMap[m.id] ? { ...m, ...updatesMap[m.id] } : m),
+      };
+    });
+  };
+
   const handleSave = async () => {
     if (!tournament) return;
     setSaving(true);
@@ -341,10 +353,10 @@ function ResultsEntry() {
       </div>
 
       {tournament.format === 'Double Elimination' && (
-        <DoubleElimResults tournament={tournament} updateMatch={updateMatch} />
+        <DoubleElimResults tournament={tournament} updateMatch={updateMatch} updateMatches={updateMatches} />
       )}
       {tournament.format === 'Best of 3' && (
-        <BestOf3Results tournament={tournament} updateMatch={updateMatch} />
+        <BestOf3Results tournament={tournament} updateMatch={updateMatch} updateMatches={updateMatches} />
       )}
       {tournament.format === 'Single Elimination' && (
         <SingleElimResults tournament={tournament} updateMatch={updateMatch} />
@@ -360,15 +372,16 @@ function ResultsEntry() {
 }
 
 // ─── Compact Score Row ────────────────────────────────────────────────────────
-function ScoreRow({ label, match, onUpdate, onToggleComplete, disabled, allowDraw }: {
+function ScoreRow({ label, match, onUpdate, onToggleComplete, onUndo, disabled, allowDraw }: {
   label: string;
   match: Match;
   onUpdate: (updates: Partial<Match>) => void;
   onToggleComplete: () => void;
+  onUndo?: () => void;
   disabled?: boolean;
   allowDraw?: boolean;
 }) {
-  const isDraw = match.scoreA[0] === match.scoreB[0] && match.scoreA[0] > 0;
+  const isDraw = match.scoreA[0] === match.scoreB[0] && (match.scoreA[0] > 0 || match.scoreB[0] > 0);
   const showDrawWarning = !allowDraw && !match.completed && isDraw;
 
   return (
@@ -392,27 +405,44 @@ function ScoreRow({ label, match, onUpdate, onToggleComplete, disabled, allowDra
           style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--gold)' }} />
         <span className="flex-1 text-sm truncate font-medium text-right">{match.playerB || 'TBD'}</span>
         {!disabled && (
-          <button
-            onClick={() => {
-              if (!match.completed && !allowDraw && isDraw) {
-                alert('Un match ne peut pas se terminer sur un score nul. Entrez un gagnant clair.');
-                return;
-              }
-              if (!match.completed && match.scoreA[0] === 0 && match.scoreB[0] === 0) {
-                alert('Entrez un score avant de marquer terminé.');
-                return;
-              }
-              onToggleComplete();
-            }}
-            className="px-2 py-1 rounded text-xs font-semibold flex-shrink-0 transition-colors"
-            style={{
-              backgroundColor: match.completed ? '#16a34a' : 'var(--bg-primary)',
-              color: match.completed ? 'white' : 'var(--text-secondary)',
-              border: `1px solid ${match.completed ? '#16a34a' : 'var(--border-color)'}`,
-              minWidth: 68,
-            }}>
-            {match.completed ? '✓ Fait' : 'Terminer'}
-          </button>
+          <>
+            {match.completed && onUndo ? (
+              <button
+                onClick={onUndo}
+                className="px-2 py-1 rounded text-xs font-semibold flex-shrink-0 transition-colors flex items-center gap-1"
+                style={{
+                  backgroundColor: '#92400e',
+                  color: '#fbbf24',
+                  border: '1px solid #b45309',
+                  minWidth: 68,
+                }}>
+                <RotateCcw size={11} />
+                Modifier
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (!match.completed && !allowDraw && isDraw) {
+                    alert('Un match ne peut pas se terminer sur un score nul. Entrez un gagnant clair.');
+                    return;
+                  }
+                  if (!match.completed && match.scoreA[0] === 0 && match.scoreB[0] === 0 && !allowDraw) {
+                    alert('Entrez un score avant de marquer terminé.');
+                    return;
+                  }
+                  onToggleComplete();
+                }}
+                className="px-2 py-1 rounded text-xs font-semibold flex-shrink-0 transition-colors"
+                style={{
+                  backgroundColor: match.completed ? '#16a34a' : 'var(--bg-primary)',
+                  color: match.completed ? 'white' : 'var(--text-secondary)',
+                  border: `1px solid ${match.completed ? '#16a34a' : 'var(--border-color)'}`,
+                  minWidth: 68,
+                }}>
+                {match.completed ? '✓ Fait' : 'Terminer'}
+              </button>
+            )}
+          </>
         )}
       </div>
       {showDrawWarning && (
@@ -457,6 +487,21 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
     }
   };
 
+  const handleUndo = (match: Match) => {
+    if (!confirm('Annuler ce résultat et le modifier ?')) return;
+    updateMatch(match.id, { completed: false });
+    // Remove winner from next match if present
+    if (match.nextMatchId) {
+      const winner = match.scoreA[0] > match.scoreB[0] ? match.playerA : match.playerB;
+      const nextMatch = tournament.bracket.find(m => m.id === match.nextMatchId);
+      if (nextMatch && winner) {
+        const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
+        const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
+        updateMatch(match.nextMatchId, { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] });
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       {sortedRounds.map((round) => {
@@ -474,14 +519,9 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
                     match={match}
                     onUpdate={(updates) => updateMatch(match.id, updates)}
                     onToggleComplete={() => handleToggleComplete(match)}
+                    onUndo={match.completed ? () => handleUndo(match) : undefined}
                     allowDraw={false}
                   />
-                  {match.streamLink !== undefined && (
-                    <input type="text" value={match.streamLink || ''} onChange={(e) => updateMatch(match.id, { streamLink: e.target.value })}
-                      placeholder="Lien stream (optionnel)"
-                      className="w-full rounded px-2 py-1 text-xs mt-2"
-                      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
-                  )}
                 </div>
               ))}
             </div>
@@ -493,10 +533,19 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
 }
 
 // ─── Double Elimination Results ───────────────────────────────────────────────
-function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament; updateMatch: (id: string, u: Partial<Match>) => void }) {
+function DoubleElimResults({
+  tournament,
+  updateMatch,
+  updateMatches,
+}: {
+  tournament: Tournament;
+  updateMatch: (id: string, u: Partial<Match>) => void;
+  updateMatches: (map: Record<string, Partial<Match>>) => void;
+}) {
   const bracket = tournament.bracket;
-  const allerMatches = bracket.filter(m => m.matchType === 'aller').sort((a, b) => a.round - b.round);
 
+  // Group aller matches by logical round
+  const allerMatches = bracket.filter(m => m.matchType === 'aller').sort((a, b) => a.round - b.round);
   const roundGroups: Match[][] = [];
   let currentRoundNum = -1;
   let currentGroup: Match[] = [];
@@ -519,73 +568,173 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
     return `Round ${groupIndex + 1}`;
   };
 
+  // Aller: allow 0-0 but require a non-null score input before completing
+  // Actually for double elim, 0-0 is a valid aller/retour result (nil draw)
   const handleAllerComplete = (allerMatch: Match) => {
-    // Individual aller CAN be a draw — aggregate decides
-    if (!allerMatch.completed && allerMatch.scoreA[0] === 0 && allerMatch.scoreB[0] === 0) {
-      alert('Entrez un score avant de marquer terminé.');
+    if (allerMatch.completed) {
+      // UNDO
+      if (!confirm('Annuler ce résultat aller ?')) return;
+      // Also undo retour if completed
+      const retourMatch = bracket.find(m => m.id === allerMatch.retourMatchId);
+      const updates: Record<string, Partial<Match>> = {
+        [allerMatch.id]: { completed: false },
+      };
+      if (retourMatch?.completed) {
+        updates[retourMatch.id] = { completed: false };
+        // Also undo barrage if any
+        const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
+        if (barrageMatch?.completed) {
+          updates[barrageMatch.id] = { completed: false, playerA: null, playerB: null, scoreA: [0], scoreB: [0], barrageNeeded: false };
+          // Undo next match
+          if (allerMatch.nextMatchId) {
+            const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
+            const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
+            if (nextMatch && winner) {
+              const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
+              const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
+              updates[allerMatch.nextMatchId] = { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] };
+            }
+          }
+        } else {
+          // Undo next match from retour aggregate
+          if (allerMatch.nextMatchId) {
+            const aggA = allerMatch.scoreA[0] + (retourMatch?.scoreA[0] ?? 0);
+            const aggB = allerMatch.scoreB[0] + (retourMatch?.scoreB[0] ?? 0);
+            const winner = aggA > aggB ? allerMatch.playerA : aggB > aggA ? allerMatch.playerB : null;
+            const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
+            if (nextMatch && winner) {
+              const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
+              const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
+              updates[allerMatch.nextMatchId] = { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] };
+            }
+          }
+        }
+      }
+      updateMatches(updates);
       return;
     }
-    updateMatch(allerMatch.id, { completed: !allerMatch.completed });
+    // Complete aller — 0-0 is allowed in double elim
+    updateMatch(allerMatch.id, { completed: true });
   };
 
   const handleRetourComplete = (allerMatch: Match, retourMatch: Match) => {
     if (!allerMatch.completed) {
-      alert('Entrez d\'abord le score aller et marquez-le terminé.');
+      alert("Terminez d'abord le match aller.");
       return;
     }
-    if (!retourMatch.completed && retourMatch.scoreA[0] === 0 && retourMatch.scoreB[0] === 0) {
-      alert('Entrez un score avant de marquer terminé.');
-      return;
-    }
-    const completing = !retourMatch.completed;
-    updateMatch(retourMatch.id, { completed: completing });
 
-    if (completing && allerMatch.barrageMatchId) {
-      const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
-      const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
-      if (aggA === aggB) {
-        // Aggregate draw → barrage
-        updateMatch(allerMatch.barrageMatchId, {
-          playerA: allerMatch.playerA,
-          playerB: allerMatch.playerB,
-          barrageNeeded: true,
-        });
-      } else {
-        const winner = aggA > aggB ? allerMatch.playerA : allerMatch.playerB;
-        if (allerMatch.nextMatchId && winner) {
+    if (retourMatch.completed) {
+      // UNDO retour
+      if (!confirm('Annuler ce résultat retour ?')) return;
+      const updates: Record<string, Partial<Match>> = {
+        [retourMatch.id]: { completed: false },
+      };
+      // Also undo barrage if completed
+      const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
+      if (barrageMatch?.completed) {
+        updates[barrageMatch.id] = { completed: false, playerA: null, playerB: null, scoreA: [0], scoreB: [0], barrageNeeded: false };
+      }
+      if (barrageMatch?.barrageNeeded) {
+        updates[barrageMatch.id] = { ...updates[barrageMatch.id], barrageNeeded: false, playerA: null, playerB: null };
+      }
+      // Undo next match propagation
+      if (allerMatch.nextMatchId) {
+        const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
+        const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
+        const winner = aggA > aggB ? allerMatch.playerA : aggB > aggA ? allerMatch.playerB : null;
+        if (winner) {
           const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
           if (nextMatch) {
-            const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
-            const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
-            updateMatch(allerMatch.nextMatchId, { playerA: pA, playerB: pB });
+            const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
+            const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
+            updates[allerMatch.nextMatchId] = { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] };
           }
         }
       }
+      updateMatches(updates);
+      return;
     }
+
+    // Complete retour
+    const completing = true;
+    const updates: Record<string, Partial<Match>> = {
+      [retourMatch.id]: { completed: completing },
+    };
+
+    const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
+    const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
+
+    if (aggA === aggB) {
+      // Aggregate draw → trigger barrage
+      if (allerMatch.barrageMatchId) {
+        updates[allerMatch.barrageMatchId] = {
+          playerA: allerMatch.playerA,
+          playerB: allerMatch.playerB,
+          barrageNeeded: true,
+        };
+      }
+    } else {
+      // Clear winner by aggregate → propagate to next round
+      const winner = aggA > aggB ? allerMatch.playerA : allerMatch.playerB;
+      if (allerMatch.nextMatchId && winner) {
+        const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
+        if (nextMatch) {
+          const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
+          const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
+          updates[allerMatch.nextMatchId] = { playerA: pA, playerB: pB };
+        }
+      }
+    }
+
+    updateMatches(updates);
   };
 
   const handleBarrageComplete = (allerMatch: Match, barrageMatch: Match) => {
-    if (!barrageMatch.completed && barrageMatch.scoreA[0] === barrageMatch.scoreB[0]) {
+    if (barrageMatch.completed) {
+      // UNDO barrage
+      if (!confirm('Annuler le résultat du barrage ?')) return;
+      const updates: Record<string, Partial<Match>> = {
+        [barrageMatch.id]: { completed: false },
+      };
+      if (allerMatch.nextMatchId) {
+        const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
+        const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
+        if (nextMatch && winner) {
+          const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
+          const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
+          updates[allerMatch.nextMatchId] = { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] };
+        }
+      }
+      updateMatches(updates);
+      return;
+    }
+
+    if (barrageMatch.scoreA[0] === barrageMatch.scoreB[0]) {
       alert('Le barrage doit avoir un gagnant clair. Pas de match nul.');
       return;
     }
-    if (!barrageMatch.completed && barrageMatch.scoreA[0] === 0 && barrageMatch.scoreB[0] === 0) {
+    if (barrageMatch.scoreA[0] === 0 && barrageMatch.scoreB[0] === 0) {
       alert('Entrez un score avant de marquer terminé.');
       return;
     }
-    const completing = !barrageMatch.completed;
-    updateMatch(barrageMatch.id, { completed: completing });
-    if (completing && allerMatch.nextMatchId) {
+
+    const updates: Record<string, Partial<Match>> = {
+      [barrageMatch.id]: { completed: true },
+    };
+
+    if (allerMatch.nextMatchId) {
       const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
       if (winner) {
         const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
         if (nextMatch) {
           const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
           const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
-          updateMatch(allerMatch.nextMatchId, { playerA: pA, playerB: pB });
+          updates[allerMatch.nextMatchId] = { playerA: pA, playerB: pB };
         }
       }
     }
+
+    updateMatches(updates);
   };
 
   return (
@@ -604,11 +753,13 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
                 const aggB = (allerMatch.scoreB[0] || 0) + (retourMatch?.scoreB[0] || 0);
                 const showBarrage = needsBarrage || barrageMatch?.barrageNeeded || barrageMatch?.completed;
 
+                const cardCompleted = !!winner || barrageMatch?.completed;
+
                 return (
                   <div key={allerMatch.id} className="p-4 rounded-lg space-y-3"
-                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${winner ? 'var(--gold)' : 'var(--border-color)'}` }}>
+                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardCompleted ? 'var(--gold)' : 'var(--border-color)'}` }}>
 
-                    {/* Header: players + winner */}
+                    {/* Header */}
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold">
                         Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{allerMatch.playerA || 'TBD'}</span>
@@ -623,35 +774,37 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
                       )}
                     </div>
 
-                    {/* Aller score row */}
+                    {/* Aller */}
                     <ScoreRow
                       label="Aller"
                       match={allerMatch}
                       onUpdate={(u) => updateMatch(allerMatch.id, u)}
                       onToggleComplete={() => handleAllerComplete(allerMatch)}
+                      onUndo={allerMatch.completed ? () => handleAllerComplete(allerMatch) : undefined}
                       allowDraw={true}
                     />
 
-                    {/* Retour score row */}
+                    {/* Retour */}
                     {retourMatch && (
                       <ScoreRow
                         label="Retour"
                         match={retourMatch}
                         onUpdate={(u) => updateMatch(retourMatch.id, u)}
                         onToggleComplete={() => handleRetourComplete(allerMatch, retourMatch)}
+                        onUndo={retourMatch.completed ? () => handleRetourComplete(allerMatch, retourMatch) : undefined}
                         disabled={!allerMatch.completed}
                         allowDraw={true}
                       />
                     )}
 
-                    {/* Aggregate summary */}
+                    {/* Aggregate */}
                     {allerMatch.completed && retourMatch?.completed && (
                       <div className="flex justify-between items-center px-3 py-2 rounded text-sm font-bold"
                         style={{ backgroundColor: 'var(--bg-secondary)' }}>
                         <span style={{ color: aggA > aggB ? 'var(--gold)' : 'var(--text-secondary)' }}>
                           {allerMatch.playerA}: {aggA}
                         </span>
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Agrégat total</span>
+                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Agrégat</span>
                         <span style={{ color: aggB > aggA ? 'var(--gold)' : 'var(--text-secondary)' }}>
                           {allerMatch.playerB}: {aggB}
                         </span>
@@ -669,6 +822,7 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
                         match={barrageMatch}
                         onUpdate={(u) => updateMatch(barrageMatch.id, u)}
                         onToggleComplete={() => handleBarrageComplete(allerMatch, barrageMatch)}
+                        onUndo={barrageMatch.completed ? () => handleBarrageComplete(allerMatch, barrageMatch) : undefined}
                         disabled={!retourMatch?.completed}
                         allowDraw={false}
                       />
@@ -685,7 +839,15 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
 }
 
 // ─── Best of 3 Results ────────────────────────────────────────────────────────
-function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; updateMatch: (id: string, u: Partial<Match>) => void }) {
+function BestOf3Results({
+  tournament,
+  updateMatch,
+  updateMatches,
+}: {
+  tournament: Tournament;
+  updateMatch: (id: string, u: Partial<Match>) => void;
+  updateMatches: (map: Record<string, Partial<Match>>) => void;
+}) {
   const bracket = tournament.bracket;
   const match1s = bracket.filter(m => m.matchType === 'bo3_match1').sort((a, b) => a.round - b.round);
 
@@ -711,20 +873,59 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
     return `Round ${groupIndex + 1}`;
   };
 
+  // Helper: propagate a winner to next match
+  const propagateWinner = (match1: Match, winner: string, updates: Record<string, Partial<Match>>) => {
+    if (!match1.nextMatchId) return;
+    const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
+    if (!nextMatch) return;
+    const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
+    const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
+    updates[match1.nextMatchId] = { playerA: pA, playerB: pB };
+  };
+
+  // Helper: remove a winner from next match
+  const unpropagateWinner = (match1: Match, winner: string | null, updates: Record<string, Partial<Match>>) => {
+    if (!match1.nextMatchId || !winner) return;
+    const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
+    if (!nextMatch) return;
+    const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
+    const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
+    updates[match1.nextMatchId] = { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] };
+  };
+
   const handleMatch1Complete = (match1: Match) => {
-    if (!match1.completed && match1.scoreA[0] === match1.scoreB[0]) {
+    if (match1.completed) {
+      // UNDO match1
+      if (!confirm('Annuler le Match 1 ?')) return;
+      const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
+      const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
+      const updates: Record<string, Partial<Match>> = {
+        [match1.id]: { completed: false },
+      };
+      // Also undo match2 and match3
+      if (match2?.completed) {
+        updates[match2.id] = { completed: false, scoreA: [0], scoreB: [0] };
+      }
+      if (match3?.completed) {
+        updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
+      }
+      // Undo next round propagation
+      const { winner } = getBo3Winner(bracket, match1);
+      if (winner) unpropagateWinner(match1, winner, updates);
+      updateMatches(updates);
+      return;
+    }
+
+    if (match1.scoreA[0] === match1.scoreB[0]) {
       alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.');
       return;
     }
-    if (!match1.completed && match1.scoreA[0] === 0 && match1.scoreB[0] === 0) {
+    if (match1.scoreA[0] === 0 && match1.scoreB[0] === 0) {
       alert('Entrez un score avant de marquer terminé.');
       return;
     }
-    const completing = !match1.completed;
-    updateMatch(match1.id, { completed: completing });
-    if (completing && match1.bo3Match2Id) {
-      updateMatch(match1.bo3Match2Id, { playerA: match1.playerA, playerB: match1.playerB });
-    }
+
+    updateMatch(match1.id, { completed: true });
   };
 
   const handleMatch2Complete = (match1: Match, match2: Match) => {
@@ -732,63 +933,91 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
       alert('Terminez d\'abord le match 1.');
       return;
     }
-    if (!match2.completed && match2.scoreA[0] === match2.scoreB[0]) {
+
+    if (match2.completed) {
+      // UNDO match2
+      if (!confirm('Annuler le Match 2 ?')) return;
+      const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
+      const updates: Record<string, Partial<Match>> = {
+        [match2.id]: { completed: false },
+      };
+      if (match3?.completed) {
+        updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
+      }
+      // Undo next round propagation
+      const { winner } = getBo3Winner(bracket, match1);
+      if (winner) unpropagateWinner(match1, winner, updates);
+      updateMatches(updates);
+      return;
+    }
+
+    if (match2.scoreA[0] === match2.scoreB[0]) {
       alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.');
       return;
     }
-    if (!match2.completed && match2.scoreA[0] === 0 && match2.scoreB[0] === 0) {
+    if (match2.scoreA[0] === 0 && match2.scoreB[0] === 0) {
       alert('Entrez un score avant de marquer terminé.');
       return;
     }
-    const completing = !match2.completed;
-    updateMatch(match2.id, { completed: completing });
 
-    if (completing) {
-      const w1 = getSingleMatchWinner(match1);
-      const w2 = getSingleMatchWinner({ ...match2, completed: true });
-      if (!w1 || !w2) return;
+    const w1 = getSingleMatchWinner(match1);
+    const w2 = match2.scoreA[0] > match2.scoreB[0] ? match1.playerA : match1.playerB;
 
-      if (w1 === w2) {
-        // 2-0 → advance winner
-        if (match1.nextMatchId) {
-          const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
-          if (nextMatch && w1) {
-            const pA = !nextMatch.playerA ? w1 : nextMatch.playerA;
-            const pB = nextMatch.playerA && !nextMatch.playerB ? w1 : nextMatch.playerB;
-            updateMatch(match1.nextMatchId, { playerA: pA, playerB: pB });
-          }
-        }
-      } else {
-        // 1-1 → match 3 needed
-        if (match1.bo3Match3Id) {
-          updateMatch(match1.bo3Match3Id, { playerA: match1.playerA, playerB: match1.playerB });
-        }
+    const updates: Record<string, Partial<Match>> = {
+      [match2.id]: { completed: true },
+    };
+
+    if (w1 && w1 === w2) {
+      // 2-0 → winner goes to next round
+      propagateWinner(match1, w1, updates);
+    } else {
+      // 1-1 → match 3 needed — set players on match3
+      if (match1.bo3Match3Id) {
+        updates[match1.bo3Match3Id] = {
+          playerA: match1.playerA,
+          playerB: match1.playerB,
+        };
       }
     }
+
+    updateMatches(updates);
   };
 
   const handleMatch3Complete = (match1: Match, match3: Match) => {
-    if (!match3.completed && match3.scoreA[0] === match3.scoreB[0]) {
+    const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
+    if (!match2?.completed) {
+      alert('Terminez d\'abord le match 2.');
+      return;
+    }
+
+    if (match3.completed) {
+      // UNDO match3
+      if (!confirm('Annuler le Match 3 ?')) return;
+      const updates: Record<string, Partial<Match>> = {
+        [match3.id]: { completed: false },
+      };
+      const winner = getSingleMatchWinner(match3);
+      if (winner) unpropagateWinner(match1, winner, updates);
+      updateMatches(updates);
+      return;
+    }
+
+    if (match3.scoreA[0] === match3.scoreB[0]) {
       alert('Le match 3 doit avoir un gagnant clair. Pas de match nul.');
       return;
     }
-    if (!match3.completed && match3.scoreA[0] === 0 && match3.scoreB[0] === 0) {
+    if (match3.scoreA[0] === 0 && match3.scoreB[0] === 0) {
       alert('Entrez un score avant de marquer terminé.');
       return;
     }
-    const completing = !match3.completed;
-    updateMatch(match3.id, { completed: completing });
-    if (completing && match1.nextMatchId) {
-      const winner = getSingleMatchWinner({ ...match3, completed: true });
-      if (winner) {
-        const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
-        if (nextMatch) {
-          const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
-          const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
-          updateMatch(match1.nextMatchId, { playerA: pA, playerB: pB });
-        }
-      }
-    }
+
+    const winner = match3.scoreA[0] > match3.scoreB[0] ? match3.playerA : match3.playerB;
+    const updates: Record<string, Partial<Match>> = {
+      [match3.id]: { completed: true },
+    };
+
+    if (winner) propagateWinner(match1, winner, updates);
+    updateMatches(updates);
   };
 
   return (
@@ -802,18 +1031,21 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
               {group.map((match1, matchIdx) => {
                 const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
                 const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
+                const { winner } = getBo3Winner(bracket, match1);
+
                 const w1 = getSingleMatchWinner(match1);
                 const w2 = match2 ? getSingleMatchWinner(match2) : null;
-                const { winner, needsMatch3 } = getBo3Winner(bracket, match1);
-                // Show match 3 if: 1-1 tie OR already has a result
-                const showMatch3 = (match2?.completed && w1 && w2 && w1 !== w2) || match3?.completed;
-
                 const winsA = [w1, w2].filter(w => w === match1.playerA).length;
                 const winsB = [w1, w2].filter(w => w === match1.playerB).length;
 
+                // Show match3 when: 1-1 after 2 matches OR match3 already played
+                const showMatch3 = (match1.completed && match2?.completed && w1 && w2 && w1 !== w2) || !!(match3?.completed) || !!(match3?.playerA);
+
+                const cardCompleted = !!winner;
+
                 return (
                   <div key={match1.id} className="p-4 rounded-lg space-y-3"
-                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${winner ? 'var(--gold)' : 'var(--border-color)'}` }}>
+                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardCompleted ? 'var(--gold)' : 'var(--border-color)'}` }}>
 
                     {/* Header */}
                     <div className="flex justify-between items-center">
@@ -828,7 +1060,7 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
                       ) : match1.completed && match2?.completed ? (
                         <span className="text-xs font-bold px-2 py-1 rounded"
                           style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
-                          Score Bo3: {winsA}-{winsB}
+                          Bo3: {winsA}-{winsB}
                         </span>
                       ) : null}
                     </div>
@@ -839,6 +1071,7 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
                       match={match1}
                       onUpdate={(u) => updateMatch(match1.id, u)}
                       onToggleComplete={() => handleMatch1Complete(match1)}
+                      onUndo={match1.completed ? () => handleMatch1Complete(match1) : undefined}
                       allowDraw={false}
                     />
 
@@ -849,13 +1082,14 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
                         match={match2}
                         onUpdate={(u) => updateMatch(match2.id, u)}
                         onToggleComplete={() => handleMatch2Complete(match1, match2)}
+                        onUndo={match2.completed ? () => handleMatch2Complete(match1, match2) : undefined}
                         disabled={!match1.completed}
                         allowDraw={false}
                       />
                     )}
 
-                    {/* Status */}
-                    {match1.completed && match2?.completed && !winner && w1 !== w2 && w1 && w2 && (
+                    {/* 1-1 indicator */}
+                    {match1.completed && match2?.completed && !winner && w1 && w2 && w1 !== w2 && (
                       <div className="text-xs text-center py-1 px-2 rounded"
                         style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
                         1-1 → Match 3 requis!
@@ -869,6 +1103,7 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
                         match={match3}
                         onUpdate={(u) => updateMatch(match3.id, u)}
                         onToggleComplete={() => handleMatch3Complete(match1, match3)}
+                        onUndo={match3.completed ? () => handleMatch3Complete(match1, match3) : undefined}
                         disabled={!match2?.completed}
                         allowDraw={false}
                       />

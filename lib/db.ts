@@ -9,7 +9,7 @@ export interface Tournament {
   format: 'Single Elimination' | 'Double Elimination' | 'Best of 3';
   bracket: Match[];
   winner?: string;
-  runner_up?: string; // only used locally / for history, NOT stored on tournaments table
+  runner_up?: string;
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
@@ -69,6 +69,17 @@ export function getDoubleElimWinner(
   const retourMatch = bracket.find(m => m.id === allerMatch.retourMatchId);
   if (!retourMatch) return { winner: null, needsBarrage: false };
 
+  // Check barrage first
+  if (allerMatch.barrageMatchId) {
+    const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
+    if (barrageMatch?.completed) {
+      const w = barrageMatch.scoreA[0] > barrageMatch.scoreB[0]
+        ? barrageMatch.playerA
+        : barrageMatch.playerB;
+      return { winner: w, needsBarrage: false };
+    }
+  }
+
   if (!allerMatch.completed || !retourMatch.completed) return { winner: null, needsBarrage: false };
 
   const pA = allerMatch.playerA;
@@ -107,6 +118,54 @@ export function getBo3Winner(
 
   const w3 = getSingleMatchWinner(match3);
   return { winner: w3, needsMatch3: true };
+}
+
+// ============================================================================
+// TOURNAMENT WINNER DETECTION — works for ALL formats
+// ============================================================================
+
+/**
+ * Detects the tournament winner from the bracket regardless of format.
+ * Returns { winner, runnerUp }
+ */
+export function detectTournamentWinner(tournament: Tournament): { winner: string | null; runnerUp: string | null } {
+  const bracket = tournament.bracket;
+  const format = tournament.format;
+
+  if (format === 'Single Elimination') {
+    // The final match has no nextMatchId and is not a barrage
+    const finalMatch = bracket.find(m => !m.nextMatchId && !m.isBarrage && m.matchType !== 'barrage' && m.matchType !== 'bo3_match2' && m.matchType !== 'bo3_match3' && m.matchType !== 'retour');
+    if (!finalMatch || !finalMatch.completed) return { winner: null, runnerUp: null };
+    const winner = getSingleMatchWinner(finalMatch);
+    const runnerUp = winner
+      ? (winner === finalMatch.playerA ? finalMatch.playerB : finalMatch.playerA)
+      : null;
+    return { winner, runnerUp };
+  }
+
+  if (format === 'Double Elimination') {
+    // Find the aller match in the final round (no nextMatchId)
+    const finalAllerMatch = bracket.find(m => m.matchType === 'aller' && !m.nextMatchId);
+    if (!finalAllerMatch) return { winner: null, runnerUp: null };
+    const { winner } = getDoubleElimWinner(bracket, finalAllerMatch);
+    const runnerUp = winner
+      ? (winner === finalAllerMatch.playerA ? finalAllerMatch.playerB : finalAllerMatch.playerA)
+      : null;
+    return { winner, runnerUp };
+  }
+
+  if (format === 'Best of 3') {
+    // Find the bo3_match1 in the final round (no nextMatchId)
+    const finalMatch1 = bracket.find(m => m.matchType === 'bo3_match1' && !m.nextMatchId);
+    if (!finalMatch1) return { winner: null, runnerUp: null };
+    const { winner } = getBo3Winner(bracket, finalMatch1);
+    const runnerUp = winner
+      ? (winner === finalMatch1.playerA ? finalMatch1.playerB : finalMatch1.playerA)
+      : null;
+    return { winner, runnerUp };
+  }
+
+  return { winner: null, runnerUp: null };
 }
 
 // ============================================================================
@@ -151,7 +210,6 @@ export async function createNewTournament(tournament: Tournament): Promise<Tourn
       }
     }
 
-    // Don't pass runner_up to tournaments table — column doesn't exist there
     const { runner_up, ...tournamentData } = tournament as any;
 
     const created = await createTournament({
@@ -168,7 +226,6 @@ export async function createNewTournament(tournament: Tournament): Promise<Tourn
 
 export async function updateCurrentTournament(tournament: Tournament): Promise<Tournament> {
   try {
-    // Strip runner_up — not a column on tournaments table
     const { runner_up, ...safeData } = tournament as any;
     const updated = await updateTournament(tournament.id, safeData);
     return updated as Tournament;
@@ -178,22 +235,26 @@ export async function updateCurrentTournament(tournament: Tournament): Promise<T
   }
 }
 
-export async function finalizeTournament(tournament: Tournament): Promise<void> {
+export async function finalizeTournament(tournament: Tournament & { runner_up?: string }): Promise<void> {
   try {
+    // Auto-detect winner/runner_up if not provided
+    let winner = tournament.winner;
     let runner_up = tournament.runner_up;
-    if (!runner_up) {
-      const finalMatch = tournament.bracket.find((m) => !m.nextMatchId && !m.isBarrage);
-      if (finalMatch && finalMatch.completed) {
-        runner_up = (finalMatch.scoreA[0] > finalMatch.scoreB[0]
-          ? finalMatch.playerB
-          : finalMatch.playerA) ?? undefined;
-      }
+
+    if (!winner || !runner_up) {
+      const detected = detectTournamentWinner(tournament);
+      if (!winner && detected.winner) winner = detected.winner;
+      if (!runner_up && detected.runnerUp) runner_up = detected.runnerUp ?? undefined;
     }
 
-    // Save to history (runner_up IS a column on historical_tournaments)
-    await saveTournamentToHistory({ ...tournament, runner_up });
+    // Save to historical_tournaments (runner_up column exists here)
+    await saveTournamentToHistory({
+      ...tournament,
+      winner: winner ?? tournament.winner,
+      runner_up: runner_up ?? undefined,
+    });
 
-    // Deactivate the tournament (no runner_up column here)
+    // Deactivate (no runner_up column on tournaments table)
     await updateTournament(tournament.id, { is_active: false });
   } catch (error) {
     console.error('Error finalizing tournament:', error);
@@ -201,10 +262,6 @@ export async function finalizeTournament(tournament: Tournament): Promise<void> 
   }
 }
 
-/**
- * Force delete the active tournament without archiving it.
- * Used when admin wants to wipe a stuck/incomplete tournament.
- */
 export async function forceDeleteActiveTournament(): Promise<void> {
   try {
     const active = await getActiveTournament();
@@ -216,9 +273,6 @@ export async function forceDeleteActiveTournament(): Promise<void> {
   }
 }
 
-/**
- * Force delete a specific tournament by id.
- */
 export async function forceDeleteTournament(id: string): Promise<void> {
   try {
     await deleteTournament(id);
@@ -245,16 +299,8 @@ export async function loadPlayers(): Promise<Player[]> {
 export async function createNewPlayer(name: string): Promise<Player> {
   try {
     const existing = await getPlayer(name);
-    if (existing) {
-      throw new Error(`Player "${name}" already exists`);
-    }
-
-    const player = await createPlayer({
-      name,
-      trophies: 0,
-      second_place: 0,
-    });
-
+    if (existing) throw new Error(`Player "${name}" already exists`);
+    const player = await createPlayer({ name, trophies: 0, second_place: 0 });
     return player as Player;
   } catch (error) {
     console.error('Error creating player:', error);
@@ -335,34 +381,11 @@ export async function saveSetting(key: string, value: any): Promise<void> {
   }
 }
 
-export async function loadTournamentName(): Promise<string> {
-  return loadSetting('tournamentName', '');
-}
-
-export async function saveTournamentName(name: string): Promise<void> {
-  return saveSetting('tournamentName', name);
-}
-
-export async function loadNextTournamentDate(): Promise<string> {
-  return loadSetting('nextTournamentDate', '');
-}
-
-export async function saveNextTournamentDate(date: string): Promise<void> {
-  return saveSetting('nextTournamentDate', date);
-}
-
-export async function loadWhatsappLink(): Promise<string> {
-  return loadSetting('whatsappLink', '');
-}
-
-export async function saveWhatsappLink(link: string): Promise<void> {
-  return saveSetting('whatsappLink', link);
-}
-
-export async function loadBackgroundImage(): Promise<string> {
-  return loadSetting('backgroundImage', '/tournament-bg.jpg');
-}
-
-export async function saveBackgroundImage(url: string): Promise<void> {
-  return saveSetting('backgroundImage', url);
-}
+export async function loadTournamentName(): Promise<string> { return loadSetting('tournamentName', ''); }
+export async function saveTournamentName(name: string): Promise<void> { return saveSetting('tournamentName', name); }
+export async function loadNextTournamentDate(): Promise<string> { return loadSetting('nextTournamentDate', ''); }
+export async function saveNextTournamentDate(date: string): Promise<void> { return saveSetting('nextTournamentDate', date); }
+export async function loadWhatsappLink(): Promise<string> { return loadSetting('whatsappLink', ''); }
+export async function saveWhatsappLink(link: string): Promise<void> { return saveSetting('whatsappLink', link); }
+export async function loadBackgroundImage(): Promise<string> { return loadSetting('backgroundImage', '/tournament-bg.jpg'); }
+export async function saveBackgroundImage(url: string): Promise<void> { return saveSetting('backgroundImage', url); }
