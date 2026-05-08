@@ -95,9 +95,9 @@ function DangerZone() {
   };
 
   const handleNuclearReset = async () => {
-    const confirm1 = confirm('⚠️ ATTENTION : Cette action va supprimer TOUTES les données (tournois, joueurs, historique, paramètres). Continuer ?');
+    const confirm1 = confirm('⚠️ ATTENTION : Cette action va supprimer TOUTES les données. Continuer ?');
     if (!confirm1) return;
-    const confirm2 = confirm('🔴 DERNIÈRE CHANCE : Êtes-vous absolument sûr ? Toutes les données seront perdues définitivement.');
+    const confirm2 = confirm('🔴 DERNIÈRE CHANCE : Êtes-vous absolument sûr ?');
     if (!confirm2) return;
 
     setResetting(true);
@@ -114,13 +114,11 @@ function DangerZone() {
 
   return (
     <div className="space-y-6">
-      {/* Force delete active tournament */}
       <div className="p-6 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: '2px solid #dc2626' }}>
         <div className="flex items-center gap-2">
           <AlertTriangle size={20} color="#dc2626" />
           <h3 className="font-bold text-lg" style={{ color: '#dc2626' }}>Supprimer le tournoi actif</h3>
         </div>
-
         {loading ? (
           <p style={{ color: 'var(--text-secondary)' }}>Chargement...</p>
         ) : activeTournament ? (
@@ -128,49 +126,31 @@ function DangerZone() {
             <div className="p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)' }}>
               <p className="font-semibold" style={{ color: 'var(--gold)' }}>{activeTournament.name}</p>
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                {activeTournament.format} · {activeTournament.size} joueurs ·{' '}
-                {activeTournament.bracket.filter(m => m.completed).length}/{activeTournament.bracket.length} matchs complétés
+                {activeTournament.format} · {activeTournament.size} joueurs
               </p>
             </div>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Supprime le tournoi sans l'archiver. Utilisez "Finish" pour archiver correctement.
-            </p>
-            <button
-              onClick={handleForceDeleteTournament}
-              disabled={deletingTournament}
+            <button onClick={handleForceDeleteTournament} disabled={deletingTournament}
               className="w-full font-bold py-3 rounded flex items-center justify-center gap-2"
-              style={{ backgroundColor: deletingTournament ? 'var(--text-secondary)' : '#dc2626', color: 'white', cursor: deletingTournament ? 'not-allowed' : 'pointer' }}>
+              style={{ backgroundColor: '#dc2626', color: 'white', cursor: deletingTournament ? 'not-allowed' : 'pointer' }}>
               <Trash2 size={18} />
               {deletingTournament ? 'Suppression...' : 'Supprimer le tournoi actif'}
             </button>
           </>
         ) : (
-          <p style={{ color: 'var(--text-secondary)' }}>Aucun tournoi actif en ce moment.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>Aucun tournoi actif.</p>
         )}
       </div>
 
-      {/* Nuclear reset */}
       <div className="p-6 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: '2px solid #7f1d1d' }}>
         <div className="flex items-center gap-2">
           <AlertTriangle size={20} color="#ef4444" />
-          <h3 className="font-bold text-lg" style={{ color: '#ef4444' }}>Reset complet — TOUT supprimer</h3>
+          <h3 className="font-bold text-lg" style={{ color: '#ef4444' }}>Reset complet</h3>
         </div>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Supprime <strong style={{ color: '#ef4444' }}>absolument toutes</strong> les données : tournois actifs, historique, joueurs, paramètres. Cette action est <strong>irréversible</strong>.
-        </p>
-        <ul className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
-          <li>🗑️ Tous les tournois (actifs et archivés)</li>
-          <li>🗑️ Tous les joueurs et leurs statistiques</li>
-          <li>🗑️ Tout l'historique</li>
-          <li>🗑️ Tous les paramètres (WhatsApp, image, etc.)</li>
-        </ul>
-        <button
-          onClick={handleNuclearReset}
-          disabled={resetting}
+        <button onClick={handleNuclearReset} disabled={resetting}
           className="w-full font-bold py-3 rounded flex items-center justify-center gap-2"
-          style={{ backgroundColor: resetting ? 'var(--text-secondary)' : '#7f1d1d', color: 'white', cursor: resetting ? 'not-allowed' : 'pointer', border: '1px solid #ef4444' }}>
+          style={{ backgroundColor: '#7f1d1d', color: 'white', cursor: resetting ? 'not-allowed' : 'pointer', border: '1px solid #ef4444' }}>
           <AlertTriangle size={18} />
-          {resetting ? 'Suppression en cours...' : '🔴 TOUT SUPPRIMER — Reset complet'}
+          {resetting ? 'Suppression...' : '🔴 TOUT SUPPRIMER'}
         </button>
       </div>
     </div>
@@ -236,7 +216,6 @@ function TournamentSetup() {
   const handleGenerateBracket = async () => {
     const filledPlayers = players.filter((p) => p.trim());
     if (filledPlayers.length === 0) { alert('Enter at least one player'); return; }
-
     setLoading(true);
     try {
       const bracket = generateBracket(players.map((p) => p || 'TBD'), size, format);
@@ -288,7 +267,7 @@ function TournamentSetup() {
               <input type="radio" name="format" value={f} checked={format === f} onChange={() => setFormat(f)} className="w-4 h-4" />
               <span className="text-sm">
                 {f === 'Single Elimination' && '🏆 Single Elimination — le gagnant avance'}
-                {f === 'Double Elimination' && '🔄 Double Elimination — aller + retour (barrage si égalité)'}
+                {f === 'Double Elimination' && '🔄 Double Elimination — aller + retour (barrage si agrégat nul)'}
                 {f === 'Best of 3' && '3️⃣ Best of 3 — gagne 2/3 matchs pour passer'}
               </span>
             </label>
@@ -380,6 +359,72 @@ function ResultsEntry() {
   );
 }
 
+// ─── Compact Score Row ────────────────────────────────────────────────────────
+function ScoreRow({ label, match, onUpdate, onToggleComplete, disabled, allowDraw }: {
+  label: string;
+  match: Match;
+  onUpdate: (updates: Partial<Match>) => void;
+  onToggleComplete: () => void;
+  disabled?: boolean;
+  allowDraw?: boolean;
+}) {
+  const isDraw = match.scoreA[0] === match.scoreB[0] && match.scoreA[0] > 0;
+  const showDrawWarning = !allowDraw && !match.completed && isDraw;
+
+  return (
+    <div className="space-y-1" style={{ opacity: disabled ? 0.5 : 1 }}>
+      <div className="text-xs font-semibold mb-1" style={{ color: 'var(--gold)' }}>{label}</div>
+      <div className="flex items-center gap-2 px-3 py-2 rounded"
+        style={{ backgroundColor: 'var(--bg-secondary)', border: `1px solid ${match.completed ? '#16a34a' : 'var(--border-color)'}` }}>
+        <span className="flex-1 text-sm truncate font-medium">{match.playerA || 'TBD'}</span>
+        <input type="number" min={0}
+          value={match.scoreA[0] === 0 && !match.completed ? '' : match.scoreA[0]}
+          placeholder="0" disabled={disabled || match.completed}
+          onChange={(e) => onUpdate({ scoreA: [Math.max(0, parseInt(e.target.value) || 0)] })}
+          className="w-11 rounded px-1 py-1 text-center font-bold text-sm"
+          style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--gold)' }} />
+        <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>-</span>
+        <input type="number" min={0}
+          value={match.scoreB[0] === 0 && !match.completed ? '' : match.scoreB[0]}
+          placeholder="0" disabled={disabled || match.completed}
+          onChange={(e) => onUpdate({ scoreB: [Math.max(0, parseInt(e.target.value) || 0)] })}
+          className="w-11 rounded px-1 py-1 text-center font-bold text-sm"
+          style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--gold)' }} />
+        <span className="flex-1 text-sm truncate font-medium text-right">{match.playerB || 'TBD'}</span>
+        {!disabled && (
+          <button
+            onClick={() => {
+              if (!match.completed && !allowDraw && isDraw) {
+                alert('Un match ne peut pas se terminer sur un score nul. Entrez un gagnant clair.');
+                return;
+              }
+              if (!match.completed && match.scoreA[0] === 0 && match.scoreB[0] === 0) {
+                alert('Entrez un score avant de marquer terminé.');
+                return;
+              }
+              onToggleComplete();
+            }}
+            className="px-2 py-1 rounded text-xs font-semibold flex-shrink-0 transition-colors"
+            style={{
+              backgroundColor: match.completed ? '#16a34a' : 'var(--bg-primary)',
+              color: match.completed ? 'white' : 'var(--text-secondary)',
+              border: `1px solid ${match.completed ? '#16a34a' : 'var(--border-color)'}`,
+              minWidth: 68,
+            }}>
+            {match.completed ? '✓ Fait' : 'Terminer'}
+          </button>
+        )}
+      </div>
+      {showDrawWarning && (
+        <div className="text-xs" style={{ color: '#ef4444' }}>⚠️ Égalité non autorisée — un gagnant est obligatoire</div>
+      )}
+      {disabled && (
+        <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>⏳ Terminez d'abord le match précédent</div>
+      )}
+    </div>
+  );
+}
+
 // ─── Single Elimination Results ───────────────────────────────────────────────
 function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament; updateMatch: (id: string, u: Partial<Match>) => void }) {
   const matchesByRound = tournament.bracket.reduce((acc, match) => {
@@ -390,6 +435,14 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
   const sortedRounds = Object.keys(matchesByRound).map(Number).sort((a, b) => a - b);
 
   const handleToggleComplete = (match: Match) => {
+    if (!match.completed && match.scoreA[0] === match.scoreB[0]) {
+      alert('Un match ne peut pas se terminer sur un score nul. Entrez un gagnant clair.');
+      return;
+    }
+    if (!match.completed && match.scoreA[0] === 0 && match.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
+      return;
+    }
     const completing = !match.completed;
     updateMatch(match.id, { completed: completing });
 
@@ -413,14 +466,23 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
         return (
           <div key={round}>
             <h3 className="text-sm font-bold mb-3 uppercase tracking-wide" style={{ color: 'var(--gold)' }}>{roundName}</h3>
-            <div className="space-y-4">
-              {matches.map(match => (
-                <SingleMatchEditor
-                  key={match.id}
-                  match={match}
-                  onUpdate={(updates) => updateMatch(match.id, updates)}
-                  onToggleComplete={() => handleToggleComplete(match)}
-                />
+            <div className="space-y-3">
+              {matches.map((match, idx) => (
+                <div key={match.id} className="p-3 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${match.completed ? 'var(--gold)' : 'var(--border-color)'}` }}>
+                  <ScoreRow
+                    label={`Match ${idx + 1}: ${match.playerA || 'TBD'} vs ${match.playerB || 'TBD'}`}
+                    match={match}
+                    onUpdate={(updates) => updateMatch(match.id, updates)}
+                    onToggleComplete={() => handleToggleComplete(match)}
+                    allowDraw={false}
+                  />
+                  {match.streamLink !== undefined && (
+                    <input type="text" value={match.streamLink || ''} onChange={(e) => updateMatch(match.id, { streamLink: e.target.value })}
+                      placeholder="Lien stream (optionnel)"
+                      className="w-full rounded px-2 py-1 text-xs mt-2"
+                      style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -458,12 +520,21 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
   };
 
   const handleAllerComplete = (allerMatch: Match) => {
+    // Individual aller CAN be a draw — aggregate decides
+    if (!allerMatch.completed && allerMatch.scoreA[0] === 0 && allerMatch.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
+      return;
+    }
     updateMatch(allerMatch.id, { completed: !allerMatch.completed });
   };
 
   const handleRetourComplete = (allerMatch: Match, retourMatch: Match) => {
     if (!allerMatch.completed) {
       alert('Entrez d\'abord le score aller et marquez-le terminé.');
+      return;
+    }
+    if (!retourMatch.completed && retourMatch.scoreA[0] === 0 && retourMatch.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
       return;
     }
     const completing = !retourMatch.completed;
@@ -473,6 +544,7 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
       const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
       const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
       if (aggA === aggB) {
+        // Aggregate draw → barrage
         updateMatch(allerMatch.barrageMatchId, {
           playerA: allerMatch.playerA,
           playerB: allerMatch.playerB,
@@ -493,9 +565,16 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
   };
 
   const handleBarrageComplete = (allerMatch: Match, barrageMatch: Match) => {
+    if (!barrageMatch.completed && barrageMatch.scoreA[0] === barrageMatch.scoreB[0]) {
+      alert('Le barrage doit avoir un gagnant clair. Pas de match nul.');
+      return;
+    }
+    if (!barrageMatch.completed && barrageMatch.scoreA[0] === 0 && barrageMatch.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
+      return;
+    }
     const completing = !barrageMatch.completed;
     updateMatch(barrageMatch.id, { completed: completing });
-
     if (completing && allerMatch.nextMatchId) {
       const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
       if (winner) {
@@ -516,50 +595,83 @@ function DoubleElimResults({ tournament, updateMatch }: { tournament: Tournament
         return (
           <div key={groupIdx}>
             <h3 className="text-sm font-bold mb-4 uppercase tracking-wide" style={{ color: 'var(--gold)' }}>{roundName}</h3>
-            <div className="space-y-6">
+            <div className="space-y-4">
               {allerGroup.map((allerMatch, matchIdx) => {
                 const retourMatch = bracket.find(m => m.id === allerMatch.retourMatchId);
                 const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
                 const { winner, needsBarrage } = getDoubleElimWinner(bracket, allerMatch);
                 const aggA = (allerMatch.scoreA[0] || 0) + (retourMatch?.scoreA[0] || 0);
                 const aggB = (allerMatch.scoreB[0] || 0) + (retourMatch?.scoreB[0] || 0);
-                const showBarrage = needsBarrage || barrageMatch?.completed;
+                const showBarrage = needsBarrage || barrageMatch?.barrageNeeded || barrageMatch?.completed;
 
                 return (
-                  <div key={allerMatch.id} className="p-4 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${winner ? 'var(--gold)' : 'var(--border-color)'}` }}>
+                  <div key={allerMatch.id} className="p-4 rounded-lg space-y-3"
+                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${winner ? 'var(--gold)' : 'var(--border-color)'}` }}>
+
+                    {/* Header: players + winner */}
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>
-                        Match {matchIdx + 1}: {allerMatch.playerA || 'TBD'} vs {allerMatch.playerB || 'TBD'}
+                      <span className="text-sm font-bold">
+                        Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{allerMatch.playerA || 'TBD'}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}> vs </span>
+                        <span style={{ color: 'var(--gold)' }}>{allerMatch.playerB || 'TBD'}</span>
                       </span>
-                      {winner && <span className="text-xs font-bold" style={{ color: 'var(--gold)' }}>✓ {winner}</span>}
+                      {winner && (
+                        <span className="text-xs font-bold px-2 py-1 rounded"
+                          style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>
+                          ✓ {winner}
+                        </span>
+                      )}
                     </div>
 
-                    <div>
-                      <div className="text-xs font-semibold mb-2" style={{ color: 'var(--gold)' }}>Aller</div>
-                      <SingleMatchEditor match={allerMatch} onUpdate={(u) => updateMatch(allerMatch.id, u)} onToggleComplete={() => handleAllerComplete(allerMatch)} />
-                    </div>
+                    {/* Aller score row */}
+                    <ScoreRow
+                      label="Aller"
+                      match={allerMatch}
+                      onUpdate={(u) => updateMatch(allerMatch.id, u)}
+                      onToggleComplete={() => handleAllerComplete(allerMatch)}
+                      allowDraw={true}
+                    />
 
+                    {/* Retour score row */}
                     {retourMatch && (
-                      <div>
-                        <div className="text-xs font-semibold mb-2" style={{ color: 'var(--gold)' }}>Retour</div>
-                        <SingleMatchEditor match={retourMatch} onUpdate={(u) => updateMatch(retourMatch.id, u)} onToggleComplete={() => handleRetourComplete(allerMatch, retourMatch)} disabled={!allerMatch.completed} disabledReason="Terminez d'abord le match aller" />
-                      </div>
+                      <ScoreRow
+                        label="Retour"
+                        match={retourMatch}
+                        onUpdate={(u) => updateMatch(retourMatch.id, u)}
+                        onToggleComplete={() => handleRetourComplete(allerMatch, retourMatch)}
+                        disabled={!allerMatch.completed}
+                        allowDraw={true}
+                      />
                     )}
 
+                    {/* Aggregate summary */}
                     {allerMatch.completed && retourMatch?.completed && (
-                      <div className="flex justify-between items-center px-3 py-2 rounded text-sm font-semibold" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-                        <span style={{ color: aggA > aggB ? 'var(--gold)' : 'var(--text-secondary)' }}>{allerMatch.playerA}: {aggA}</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Agrégat</span>
-                        <span style={{ color: aggB > aggA ? 'var(--gold)' : 'var(--text-secondary)' }}>{allerMatch.playerB}: {aggB}</span>
-                        {needsBarrage && <span className="text-xs px-2 py-1 rounded ml-2" style={{ backgroundColor: '#dc2626', color: 'white' }}>Barrage!</span>}
+                      <div className="flex justify-between items-center px-3 py-2 rounded text-sm font-bold"
+                        style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                        <span style={{ color: aggA > aggB ? 'var(--gold)' : 'var(--text-secondary)' }}>
+                          {allerMatch.playerA}: {aggA}
+                        </span>
+                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Agrégat total</span>
+                        <span style={{ color: aggB > aggA ? 'var(--gold)' : 'var(--text-secondary)' }}>
+                          {allerMatch.playerB}: {aggB}
+                        </span>
+                        {needsBarrage && (
+                          <span className="text-xs px-2 py-1 rounded ml-2"
+                            style={{ backgroundColor: '#dc2626', color: 'white' }}>Barrage!</span>
+                        )}
                       </div>
                     )}
 
-                    {(showBarrage || needsBarrage) && barrageMatch && (
-                      <div>
-                        <div className="text-xs font-semibold mb-2" style={{ color: '#ef4444' }}>⚡ Barrage (égalité {aggA}-{aggB})</div>
-                        <SingleMatchEditor match={barrageMatch} onUpdate={(u) => updateMatch(barrageMatch.id, u)} onToggleComplete={() => handleBarrageComplete(allerMatch, barrageMatch)} disabled={!retourMatch?.completed} disabledReason="Terminez d'abord le match retour" />
-                      </div>
+                    {/* Barrage */}
+                    {showBarrage && barrageMatch && (
+                      <ScoreRow
+                        label={`⚡ Barrage — égalité (${aggA}-${aggB}) — pas de nul`}
+                        match={barrageMatch}
+                        onUpdate={(u) => updateMatch(barrageMatch.id, u)}
+                        onToggleComplete={() => handleBarrageComplete(allerMatch, barrageMatch)}
+                        disabled={!retourMatch?.completed}
+                        allowDraw={false}
+                      />
                     )}
                   </div>
                 );
@@ -600,6 +712,14 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
   };
 
   const handleMatch1Complete = (match1: Match) => {
+    if (!match1.completed && match1.scoreA[0] === match1.scoreB[0]) {
+      alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.');
+      return;
+    }
+    if (!match1.completed && match1.scoreA[0] === 0 && match1.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
+      return;
+    }
     const completing = !match1.completed;
     updateMatch(match1.id, { completed: completing });
     if (completing && match1.bo3Match2Id) {
@@ -608,7 +728,18 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
   };
 
   const handleMatch2Complete = (match1: Match, match2: Match) => {
-    if (!match1.completed) { alert('Terminez d\'abord le match 1.'); return; }
+    if (!match1.completed) {
+      alert('Terminez d\'abord le match 1.');
+      return;
+    }
+    if (!match2.completed && match2.scoreA[0] === match2.scoreB[0]) {
+      alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.');
+      return;
+    }
+    if (!match2.completed && match2.scoreA[0] === 0 && match2.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
+      return;
+    }
     const completing = !match2.completed;
     updateMatch(match2.id, { completed: completing });
 
@@ -618,6 +749,7 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
       if (!w1 || !w2) return;
 
       if (w1 === w2) {
+        // 2-0 → advance winner
         if (match1.nextMatchId) {
           const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
           if (nextMatch && w1) {
@@ -627,6 +759,7 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
           }
         }
       } else {
+        // 1-1 → match 3 needed
         if (match1.bo3Match3Id) {
           updateMatch(match1.bo3Match3Id, { playerA: match1.playerA, playerB: match1.playerB });
         }
@@ -635,6 +768,14 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
   };
 
   const handleMatch3Complete = (match1: Match, match3: Match) => {
+    if (!match3.completed && match3.scoreA[0] === match3.scoreB[0]) {
+      alert('Le match 3 doit avoir un gagnant clair. Pas de match nul.');
+      return;
+    }
+    if (!match3.completed && match3.scoreA[0] === 0 && match3.scoreB[0] === 0) {
+      alert('Entrez un score avant de marquer terminé.');
+      return;
+    }
     const completing = !match3.completed;
     updateMatch(match3.id, { completed: completing });
     if (completing && match1.nextMatchId) {
@@ -657,57 +798,80 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
         return (
           <div key={groupIdx}>
             <h3 className="text-sm font-bold mb-4 uppercase tracking-wide" style={{ color: 'var(--gold)' }}>{roundName}</h3>
-            <div className="space-y-6">
+            <div className="space-y-4">
               {group.map((match1, matchIdx) => {
                 const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
                 const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
                 const w1 = getSingleMatchWinner(match1);
                 const w2 = match2 ? getSingleMatchWinner(match2) : null;
                 const { winner, needsMatch3 } = getBo3Winner(bracket, match1);
-                const showMatch3 = needsMatch3 || match3?.completed;
-                const scoreA_wins = [w1, w2].filter(w => w === match1.playerA).length;
-                const scoreB_wins = [w1, w2].filter(w => w === match1.playerB).length;
+                // Show match 3 if: 1-1 tie OR already has a result
+                const showMatch3 = (match2?.completed && w1 && w2 && w1 !== w2) || match3?.completed;
+
+                const winsA = [w1, w2].filter(w => w === match1.playerA).length;
+                const winsB = [w1, w2].filter(w => w === match1.playerB).length;
 
                 return (
-                  <div key={match1.id} className="p-4 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${winner ? 'var(--gold)' : 'var(--border-color)'}` }}>
+                  <div key={match1.id} className="p-4 rounded-lg space-y-3"
+                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${winner ? 'var(--gold)' : 'var(--border-color)'}` }}>
+
+                    {/* Header */}
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>
-                        Match {matchIdx + 1}: {match1.playerA || 'TBD'} vs {match1.playerB || 'TBD'}
+                      <span className="text-sm font-bold">
+                        Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{match1.playerA || 'TBD'}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}> vs </span>
+                        <span style={{ color: 'var(--gold)' }}>{match1.playerB || 'TBD'}</span>
                       </span>
-                      {winner && <span className="text-xs font-bold" style={{ color: 'var(--gold)' }}>✓ {winner}</span>}
+                      {winner ? (
+                        <span className="text-xs font-bold px-2 py-1 rounded"
+                          style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>✓ {winner}</span>
+                      ) : match1.completed && match2?.completed ? (
+                        <span className="text-xs font-bold px-2 py-1 rounded"
+                          style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
+                          Score Bo3: {winsA}-{winsB}
+                        </span>
+                      ) : null}
                     </div>
 
-                    {match1.completed && (
-                      <div className="flex justify-between items-center px-3 py-2 rounded text-sm font-semibold" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-                        <span style={{ color: scoreA_wins > scoreB_wins ? 'var(--gold)' : 'var(--text-secondary)' }}>{match1.playerA}: {scoreA_wins} 🏆</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>Score Bo3</span>
-                        <span style={{ color: scoreB_wins > scoreA_wins ? 'var(--gold)' : 'var(--text-secondary)' }}>{match1.playerB}: {scoreB_wins} 🏆</span>
-                      </div>
-                    )}
+                    {/* Match 1 */}
+                    <ScoreRow
+                      label="Match 1"
+                      match={match1}
+                      onUpdate={(u) => updateMatch(match1.id, u)}
+                      onToggleComplete={() => handleMatch1Complete(match1)}
+                      allowDraw={false}
+                    />
 
-                    <div>
-                      <div className="text-xs font-semibold mb-2" style={{ color: 'var(--gold)' }}>Match 1</div>
-                      <SingleMatchEditor match={match1} onUpdate={(u) => updateMatch(match1.id, u)} onToggleComplete={() => handleMatch1Complete(match1)} />
-                    </div>
-
+                    {/* Match 2 */}
                     {match2 && (
-                      <div>
-                        <div className="text-xs font-semibold mb-2" style={{ color: 'var(--gold)' }}>Match 2</div>
-                        <SingleMatchEditor match={match2} onUpdate={(u) => updateMatch(match2.id, u)} onToggleComplete={() => handleMatch2Complete(match1, match2)} disabled={!match1.completed} disabledReason="Terminez d'abord le match 1" />
-                        {match1.completed && w1 && match2.completed && w1 === w2 && (
-                          <div className="text-xs text-center mt-1 px-2 py-1 rounded" style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>✓ {w1} gagne 2/2 — passe directement</div>
-                        )}
-                        {match1.completed && match2.completed && w1 !== w2 && !winner && (
-                          <div className="text-xs text-center mt-1 px-2 py-1 rounded" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>1-1 → Match 3 requis!</div>
-                        )}
+                      <ScoreRow
+                        label="Match 2"
+                        match={match2}
+                        onUpdate={(u) => updateMatch(match2.id, u)}
+                        onToggleComplete={() => handleMatch2Complete(match1, match2)}
+                        disabled={!match1.completed}
+                        allowDraw={false}
+                      />
+                    )}
+
+                    {/* Status */}
+                    {match1.completed && match2?.completed && !winner && w1 !== w2 && w1 && w2 && (
+                      <div className="text-xs text-center py-1 px-2 rounded"
+                        style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
+                        1-1 → Match 3 requis!
                       </div>
                     )}
 
-                    {(showMatch3 || needsMatch3) && match3 && (
-                      <div>
-                        <div className="text-xs font-semibold mb-2" style={{ color: '#ef4444' }}>⚡ Match 3 (1-1, départage)</div>
-                        <SingleMatchEditor match={match3} onUpdate={(u) => updateMatch(match3.id, u)} onToggleComplete={() => handleMatch3Complete(match1, match3)} disabled={!match2?.completed} disabledReason="Terminez d'abord le match 2" />
-                      </div>
+                    {/* Match 3 */}
+                    {showMatch3 && match3 && (
+                      <ScoreRow
+                        label="⚡ Match 3 — 1-1, départage — pas de nul"
+                        match={match3}
+                        onUpdate={(u) => updateMatch(match3.id, u)}
+                        onToggleComplete={() => handleMatch3Complete(match1, match3)}
+                        disabled={!match2?.completed}
+                        allowDraw={false}
+                      />
                     )}
                   </div>
                 );
@@ -716,66 +880,6 @@ function BestOf3Results({ tournament, updateMatch }: { tournament: Tournament; u
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ─── Shared Single Match Editor ───────────────────────────────────────────────
-function SingleMatchEditor({ match, onUpdate, onToggleComplete, disabled = false, disabledReason }: {
-  match: Match;
-  onUpdate: (updates: Partial<Match>) => void;
-  onToggleComplete: () => void;
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  return (
-    <div className="space-y-2 p-3 rounded-lg" style={{ backgroundColor: 'var(--bg-secondary)', border: `1px solid ${match.completed ? 'var(--gold)' : 'var(--border-color)'}`, opacity: disabled ? 0.5 : 1 }}>
-      <div className="flex items-center gap-3">
-        <span className="flex-1 text-sm font-medium truncate">{match.playerA || 'TBD'}</span>
-        <input type="number" min={0}
-          value={match.scoreA[0] === 0 && !match.completed ? '' : match.scoreA[0]}
-          placeholder="0" disabled={disabled || match.completed}
-          onChange={(e) => onUpdate({ scoreA: [Math.max(0, parseInt(e.target.value) || 0), ...match.scoreA.slice(1)] })}
-          className="w-14 rounded px-2 py-1 text-center font-bold text-sm"
-          style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--gold)', cursor: disabled || match.completed ? 'not-allowed' : 'text' }} />
-      </div>
-
-      <div className="flex items-center gap-3">
-        <span className="flex-1 text-sm font-medium truncate">{match.playerB || 'TBD'}</span>
-        <input type="number" min={0}
-          value={match.scoreB[0] === 0 && !match.completed ? '' : match.scoreB[0]}
-          placeholder="0" disabled={disabled || match.completed}
-          onChange={(e) => onUpdate({ scoreB: [Math.max(0, parseInt(e.target.value) || 0), ...match.scoreB.slice(1)] })}
-          className="w-14 rounded px-2 py-1 text-center font-bold text-sm"
-          style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--gold)', cursor: disabled || match.completed ? 'not-allowed' : 'text' }} />
-      </div>
-
-      {!match.completed && !disabled && match.scoreA[0] === match.scoreB[0] && match.scoreA[0] > 0 && (
-        <div className="text-xs text-center" style={{ color: '#ef4444' }}>⚠️ Égalité non autorisée — un gagnant est obligatoire</div>
-      )}
-
-      <input type="text" value={match.streamLink || ''} onChange={(e) => onUpdate({ streamLink: e.target.value })}
-        placeholder="Lien stream (optionnel)" disabled={disabled}
-        className="w-full rounded px-2 py-1 text-xs"
-        style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', cursor: disabled ? 'not-allowed' : 'text' }} />
-
-      {disabled ? (
-        <div className="text-xs text-center py-1" style={{ color: 'var(--text-secondary)' }}>{disabledReason}</div>
-      ) : (
-        <button
-          onClick={() => {
-            if (!match.completed && match.scoreA[0] === match.scoreB[0]) {
-              alert('Un match ne peut pas se terminer sur un score nul. Entrez un gagnant clair.');
-              return;
-            }
-            onToggleComplete();
-          }}
-          className="w-full py-1.5 rounded text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-          style={{ backgroundColor: match.completed ? '#16a34a' : 'var(--bg-primary)', color: match.completed ? 'white' : 'var(--text-primary)', border: `1px solid ${match.completed ? '#16a34a' : 'var(--border-color)'}` }}>
-          <Check size={14} />
-          {match.completed ? 'Marquer Incomplet' : 'Marquer Terminé'}
-        </button>
-      )}
     </div>
   );
 }
@@ -899,25 +1003,19 @@ function FinishTournament() {
     if (!tournament) return;
     const finalWinner = winner || getDetectedWinner();
     const finalRunnerUp = runnerUp || getDetectedRunnerUp();
-    if (!finalWinner) { alert('No winner detected. Make sure the final match is completed, or enter the winner name manually.'); return; }
+    if (!finalWinner) { alert('No winner detected.'); return; }
     if (!confirm(`Finish tournament and declare "${finalWinner}" as winner?`)) return;
 
     setFinishing(true);
     try {
-      // Update tournament without runner_up (column doesn't exist on tournaments table)
       const updated = { ...tournament, winner: finalWinner };
       await db.updateCurrentTournament(updated);
-
-      // Finalize saves to history WITH runner_up, then deactivates
       await db.finalizeTournament({ ...updated, runner_up: finalRunnerUp || undefined });
-
       await db.incrementPlayerWins(finalWinner);
       if (finalRunnerUp) await db.incrementPlayerFinals(finalRunnerUp);
-
       alert(`✅ Tournament finished! Winner: ${finalWinner}`);
       setTournament(null);
     } catch (error) {
-      console.error(error);
       alert('Error finishing tournament: ' + (error as any).message);
     } finally {
       setFinishing(false);
@@ -925,11 +1023,7 @@ function FinishTournament() {
   };
 
   if (loading) return <div className="text-center py-8">Loading...</div>;
-  if (!tournament) return (
-    <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>
-      No active tournament to finish.
-    </div>
-  );
+  if (!tournament) return <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>No active tournament to finish.</div>;
 
   const detectedWinner = getDetectedWinner();
   const detectedRunnerUp = getDetectedRunnerUp();
@@ -942,29 +1036,19 @@ function FinishTournament() {
         <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--gold)' }}>{tournament.name}</h3>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{completedMatches}/{totalMatches} matches completed</p>
       </div>
-
       <div className="w-full rounded-full h-2" style={{ backgroundColor: 'var(--bg-secondary)' }}>
         <div className="h-2 rounded-full transition-all" style={{ width: `${(completedMatches / totalMatches) * 100}%`, backgroundColor: 'var(--gold)' }} />
       </div>
-
       {detectedWinner ? (
         <div className="p-4 rounded-lg space-y-2" style={{ backgroundColor: 'var(--gold-light)', border: '1px solid var(--gold)' }}>
           <div className="text-center">
             <Trophy size={32} className="mx-auto mb-2" style={{ color: 'var(--gold)' }} />
-            <p className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Gagnant détecté</p>
             <p className="text-xl font-bold" style={{ color: 'var(--gold)' }}>{detectedWinner}</p>
+            {detectedRunnerUp && <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Runner-up: {detectedRunnerUp}</p>}
           </div>
-          {detectedRunnerUp && (
-            <div className="text-center">
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Runner-up: <strong>{detectedRunnerUp}</strong></p>
-            </div>
-          )}
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Aucun gagnant détecté automatiquement. Vous pouvez entrer les noms manuellement :
-          </p>
           <div>
             <label className="block text-sm font-semibold mb-2">Nom du gagnant</label>
             <input type="text" value={winner} onChange={(e) => setWinner(e.target.value)}
@@ -981,7 +1065,6 @@ function FinishTournament() {
           </div>
         </div>
       )}
-
       <button onClick={handleFinish} disabled={finishing}
         className="w-full font-bold py-3 rounded flex items-center justify-center gap-2"
         style={{ backgroundColor: finishing ? 'var(--text-secondary)' : '#16a34a', color: 'white', cursor: finishing ? 'not-allowed' : 'pointer' }}>
@@ -997,7 +1080,6 @@ function HistoryManagement() {
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [resetting, setResetting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -1015,8 +1097,7 @@ function HistoryManagement() {
     if (!confirm(`Delete "${name}" from history?`)) return;
     setDeletingId(id);
     try {
-      const { error } = await supabase.from('historical_tournaments').delete().eq('id', id);
-      if (error) throw error;
+      await supabase.from('historical_tournaments').delete().eq('id', id);
       setTournaments(prev => prev.filter(t => t.id !== id));
     } catch {
       alert('Error deleting tournament');
@@ -1025,35 +1106,10 @@ function HistoryManagement() {
     }
   };
 
-  const handleResetAll = async () => {
-    if (!confirm('Delete ALL historical tournaments?')) return;
-    setResetting(true);
-    try {
-      const { error } = await supabase.from('historical_tournaments').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      if (error) throw error;
-      setTournaments([]);
-    } catch {
-      alert('Error resetting history');
-    } finally {
-      setResetting(false);
-    }
-  };
-
   if (loading) return <div className="text-center py-8">Loading history...</div>;
 
   return (
     <div className="space-y-4">
-      {tournaments.length > 0 && (
-        <div className="flex justify-end">
-          <button onClick={handleResetAll} disabled={resetting}
-            className="flex items-center gap-2 px-4 py-2 rounded font-semibold text-sm"
-            style={{ backgroundColor: '#dc2626', color: 'white', cursor: resetting ? 'not-allowed' : 'pointer', opacity: resetting ? 0.7 : 1 }}>
-            <Trash2 size={14} />
-            {resetting ? 'Resetting...' : 'Reset All History'}
-          </button>
-        </div>
-      )}
-
       {tournaments.length === 0 ? (
         <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>No finished tournaments yet.</div>
       ) : (
@@ -1061,37 +1117,26 @@ function HistoryManagement() {
           <div key={t.id} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
-                <p className="font-bold truncate" style={{ color: 'var(--text-primary)' }}>{t.name}</p>
+                <p className="font-bold truncate">{t.name}</p>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                   {t.format} · {t.size} players{t.date && ` · ${new Date(t.date).toLocaleDateString()}`}
                 </p>
+                {t.winner && (
+                  <div className="flex items-center gap-1 mt-2" style={{ color: 'var(--gold)' }}>
+                    <Trophy size={14} />
+                    <span className="font-semibold text-sm">{t.winner}</span>
+                  </div>
+                )}
+                {t.runner_up && (
+                  <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>🥈 {t.runner_up}</div>
+                )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <History size={16} style={{ color: 'var(--text-secondary)' }} />
-                <button onClick={() => handleDelete(t.id, t.name)} disabled={deletingId === t.id}
-                  className="p-1.5 rounded"
-                  style={{ backgroundColor: '#dc2626', color: 'white', cursor: deletingId === t.id ? 'not-allowed' : 'pointer', opacity: deletingId === t.id ? 0.7 : 1 }}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
+              <button onClick={() => handleDelete(t.id, t.name)} disabled={deletingId === t.id}
+                className="p-1.5 rounded flex-shrink-0"
+                style={{ backgroundColor: '#dc2626', color: 'white' }}>
+                <Trash2 size={14} />
+              </button>
             </div>
-            {t.winner && (
-              <div className="flex items-center gap-2 mt-3" style={{ color: 'var(--gold)' }}>
-                <Trophy size={16} />
-                <span className="font-semibold text-sm">{t.winner}</span>
-                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Winner</span>
-              </div>
-            )}
-            {t.runner_up && (
-              <div className="flex items-center gap-2 mt-1" style={{ color: 'var(--text-secondary)' }}>
-                <span>🥈</span>
-                <span className="font-semibold text-sm">{t.runner_up}</span>
-                <span className="text-xs">Runner-up</span>
-              </div>
-            )}
-            <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-              {t.bracket?.filter((m: any) => m.completed).length ?? 0}/{t.bracket?.length ?? 0} matches played
-            </p>
           </div>
         ))
       )}
