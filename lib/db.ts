@@ -6,7 +6,7 @@ export interface Tournament {
   name: string;
   date?: string;
   size: 8 | 16 | 32 | 64 | 128 | 256;
-  format: 'Single Elimination' | 'Double Elimination' | 'Round Robin';
+  format: 'Single Elimination' | 'Double Elimination' | 'Best of 3';
   bracket: Match[];
   winner?: string;
   runner_up?: string;
@@ -24,8 +24,18 @@ export interface Match {
   completed: boolean;
   nextMatchId?: string;
   round: number;
-  barrage?: { scoreA: number; scoreB: number };
   streamLink?: string;
+
+  // Double Elimination fields
+  matchType?: 'aller' | 'retour' | 'barrage' | 'bo3_match1' | 'bo3_match2' | 'bo3_match3' | 'single';
+  allerMatchId?: string;
+  retourMatchId?: string;
+  barrageMatchId?: string;
+  bo3Match1Id?: string;
+  bo3Match2Id?: string;
+  bo3Match3Id?: string;
+  isBarrage?: boolean;
+  barrageNeeded?: boolean; // computed: true when scores are tied
 }
 
 export interface Player {
@@ -35,6 +45,83 @@ export interface Player {
   second_place: number;
   created_at?: string;
   updated_at?: string;
+}
+
+// ============================================================================
+// WINNER LOGIC HELPERS
+// ============================================================================
+
+/**
+ * Get the winner of a single match (or null if not completed / no clear winner).
+ * For Single Elimination: higher score wins. No ties allowed.
+ */
+export function getSingleMatchWinner(match: Match): string | null {
+  if (!match.completed) return null;
+  if (!match.playerA && match.playerB) return match.playerB;
+  if (!match.playerB && match.playerA) return match.playerA;
+  if (!match.playerA || !match.playerB) return null;
+  if (match.scoreA[0] > match.scoreB[0]) return match.playerA;
+  if (match.scoreB[0] > match.scoreA[0]) return match.playerB;
+  return null; // draw — shouldn't happen in single elim
+}
+
+/**
+ * Get the winner of a Double Elimination (aller-retour) pair.
+ * Returns winner based on aggregate score. If tied → null (barrage needed).
+ */
+export function getDoubleElimWinner(
+  bracket: Match[],
+  allerMatch: Match
+): { winner: string | null; needsBarrage: boolean } {
+  if (!allerMatch.retourMatchId) return { winner: null, needsBarrage: false };
+  const retourMatch = bracket.find(m => m.id === allerMatch.retourMatchId);
+  if (!retourMatch) return { winner: null, needsBarrage: false };
+
+  if (!allerMatch.completed || !retourMatch.completed) return { winner: null, needsBarrage: false };
+
+  const pA = allerMatch.playerA;
+  const pB = allerMatch.playerB;
+  if (!pA || !pB) return { winner: null, needsBarrage: false };
+
+  const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
+  const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
+
+  if (aggA > aggB) return { winner: pA, needsBarrage: false };
+  if (aggB > aggA) return { winner: pB, needsBarrage: false };
+  // Tied aggregate → need barrage
+  return { winner: null, needsBarrage: true };
+}
+
+/**
+ * Get the winner of a Best of 3 group.
+ * Match1 winner + Match2 winner: if same player → that player wins.
+ * If different → Match3 winner decides.
+ */
+export function getBo3Winner(
+  bracket: Match[],
+  match1: Match
+): { winner: string | null; needsMatch3: boolean } {
+  if (!match1.bo3Match2Id) return { winner: null, needsMatch3: false };
+  const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
+  if (!match2) return { winner: null, needsMatch3: false };
+
+  if (!match1.completed) return { winner: null, needsMatch3: false };
+  const w1 = getSingleMatchWinner(match1);
+  if (!w1) return { winner: null, needsMatch3: false };
+
+  if (!match2.completed) return { winner: null, needsMatch3: false };
+  const w2 = getSingleMatchWinner(match2);
+  if (!w2) return { winner: null, needsMatch3: false };
+
+  if (w1 === w2) return { winner: w1, needsMatch3: false };
+
+  // 1-1 → need match 3
+  if (!match1.bo3Match3Id) return { winner: null, needsMatch3: true };
+  const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
+  if (!match3 || !match3.completed) return { winner: null, needsMatch3: true };
+
+  const w3 = getSingleMatchWinner(match3);
+  return { winner: w3, needsMatch3: true };
 }
 
 // ============================================================================
@@ -103,10 +190,9 @@ export async function updateCurrentTournament(tournament: Tournament): Promise<T
 
 export async function finalizeTournament(tournament: Tournament): Promise<void> {
   try {
-    // Detect runner_up from the final match
     let runner_up = tournament.runner_up;
     if (!runner_up) {
-      const finalMatch = tournament.bracket.find((m) => !m.nextMatchId);
+      const finalMatch = tournament.bracket.find((m) => !m.nextMatchId && !m.isBarrage);
       if (finalMatch && finalMatch.completed) {
         runner_up = (finalMatch.scoreA[0] > finalMatch.scoreB[0]
           ? finalMatch.playerB
@@ -169,9 +255,7 @@ export async function updatePlayerStats(playerId: string, stats: Partial<Omit<Pl
 export async function ensurePlayerExists(name: string): Promise<Player> {
   try {
     const existing = await getPlayer(name);
-    if (existing) {
-      return existing as Player;
-    }
+    if (existing) return existing as Player;
     return await createNewPlayer(name);
   } catch (error) {
     console.error('Error ensuring player exists:', error);
