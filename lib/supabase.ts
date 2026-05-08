@@ -17,7 +17,7 @@ export interface Tournament {
   format: string;
   bracket: any[];
   winner?: string;
-  runner_up?: string;
+  // NOTE: runner_up does NOT exist on tournaments table — only on historical_tournaments
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -82,9 +82,12 @@ export async function createTournament(tournament: Tournament) {
 }
 
 export async function updateTournament(id: string, updates: Partial<Tournament>) {
+  // Remove runner_up from updates — that column doesn't exist on tournaments table
+  const { runner_up, ...safeUpdates } = updates as any;
+  
   const { data, error } = await supabase
     .from('tournaments')
-    .update(updates)
+    .update(safeUpdates)
     .eq('id', id)
     .select()
     .single();
@@ -94,6 +97,18 @@ export async function updateTournament(id: string, updates: Partial<Tournament>)
     throw error;
   }
   return data;
+}
+
+export async function deleteTournament(id: string) {
+  const { error } = await supabase
+    .from('tournaments')
+    .delete()
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Error deleting tournament:', error);
+    throw error;
+  }
 }
 
 export async function saveTournamentToHistory(tournament: Tournament & { runner_up?: string }) {
@@ -211,4 +226,41 @@ export async function setSetting(key: string, value: any) {
     throw error;
   }
   return data;
+}
+
+// Nuclear reset — deletes ALL data
+export async function resetAllData() {
+  const errors: string[] = [];
+
+  // Delete all historical tournaments
+  const { error: e1 } = await supabase
+    .from('historical_tournaments')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+  if (e1) errors.push('historical_tournaments: ' + e1.message);
+
+  // Delete all tournaments
+  const { error: e2 } = await supabase
+    .from('tournaments')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+  if (e2) errors.push('tournaments: ' + e2.message);
+
+  // Delete all players
+  const { error: e3 } = await supabase
+    .from('players')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+  if (e3) errors.push('players: ' + e3.message);
+
+  // Delete all settings
+  const { error: e4 } = await supabase
+    .from('settings')
+    .delete()
+    .neq('id', 0);
+  if (e4) errors.push('settings: ' + e4.message);
+
+  if (errors.length > 0) {
+    throw new Error('Reset errors: ' + errors.join(' | '));
+  }
 }

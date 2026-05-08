@@ -1,5 +1,5 @@
 // Database layer - Supabase as the ONLY data source (no localStorage)
-import { supabase, createTournament, updateTournament, getActiveTournament, getTournaments, saveTournamentToHistory, getPlayers, getPlayer, createPlayer, updatePlayer, getSetting, setSetting } from './supabase';
+import { supabase, createTournament, updateTournament, deleteTournament, getActiveTournament, getTournaments, saveTournamentToHistory, getPlayers, getPlayer, createPlayer, updatePlayer, getSetting, setSetting } from './supabase';
 
 export interface Tournament {
   id: string;
@@ -9,7 +9,7 @@ export interface Tournament {
   format: 'Single Elimination' | 'Double Elimination' | 'Best of 3';
   bracket: Match[];
   winner?: string;
-  runner_up?: string;
+  runner_up?: string; // only used locally / for history, NOT stored on tournaments table
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
@@ -35,7 +35,7 @@ export interface Match {
   bo3Match2Id?: string;
   bo3Match3Id?: string;
   isBarrage?: boolean;
-  barrageNeeded?: boolean; // computed: true when scores are tied
+  barrageNeeded?: boolean;
 }
 
 export interface Player {
@@ -51,10 +51,6 @@ export interface Player {
 // WINNER LOGIC HELPERS
 // ============================================================================
 
-/**
- * Get the winner of a single match (or null if not completed / no clear winner).
- * For Single Elimination: higher score wins. No ties allowed.
- */
 export function getSingleMatchWinner(match: Match): string | null {
   if (!match.completed) return null;
   if (!match.playerA && match.playerB) return match.playerB;
@@ -62,13 +58,9 @@ export function getSingleMatchWinner(match: Match): string | null {
   if (!match.playerA || !match.playerB) return null;
   if (match.scoreA[0] > match.scoreB[0]) return match.playerA;
   if (match.scoreB[0] > match.scoreA[0]) return match.playerB;
-  return null; // draw — shouldn't happen in single elim
+  return null;
 }
 
-/**
- * Get the winner of a Double Elimination (aller-retour) pair.
- * Returns winner based on aggregate score. If tied → null (barrage needed).
- */
 export function getDoubleElimWinner(
   bracket: Match[],
   allerMatch: Match
@@ -88,15 +80,9 @@ export function getDoubleElimWinner(
 
   if (aggA > aggB) return { winner: pA, needsBarrage: false };
   if (aggB > aggA) return { winner: pB, needsBarrage: false };
-  // Tied aggregate → need barrage
   return { winner: null, needsBarrage: true };
 }
 
-/**
- * Get the winner of a Best of 3 group.
- * Match1 winner + Match2 winner: if same player → that player wins.
- * If different → Match3 winner decides.
- */
 export function getBo3Winner(
   bracket: Match[],
   match1: Match
@@ -115,7 +101,6 @@ export function getBo3Winner(
 
   if (w1 === w2) return { winner: w1, needsMatch3: false };
 
-  // 1-1 → need match 3
   if (!match1.bo3Match3Id) return { winner: null, needsMatch3: true };
   const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
   if (!match3 || !match3.completed) return { winner: null, needsMatch3: true };
@@ -166,8 +151,11 @@ export async function createNewTournament(tournament: Tournament): Promise<Tourn
       }
     }
 
+    // Don't pass runner_up to tournaments table — column doesn't exist there
+    const { runner_up, ...tournamentData } = tournament as any;
+
     const created = await createTournament({
-      ...tournament,
+      ...tournamentData,
       is_active: true,
     });
 
@@ -180,7 +168,9 @@ export async function createNewTournament(tournament: Tournament): Promise<Tourn
 
 export async function updateCurrentTournament(tournament: Tournament): Promise<Tournament> {
   try {
-    const updated = await updateTournament(tournament.id, tournament);
+    // Strip runner_up — not a column on tournaments table
+    const { runner_up, ...safeData } = tournament as any;
+    const updated = await updateTournament(tournament.id, safeData);
     return updated as Tournament;
   } catch (error) {
     console.error('Error updating tournament:', error);
@@ -200,10 +190,40 @@ export async function finalizeTournament(tournament: Tournament): Promise<void> 
       }
     }
 
+    // Save to history (runner_up IS a column on historical_tournaments)
     await saveTournamentToHistory({ ...tournament, runner_up });
+
+    // Deactivate the tournament (no runner_up column here)
     await updateTournament(tournament.id, { is_active: false });
   } catch (error) {
     console.error('Error finalizing tournament:', error);
+    throw error;
+  }
+}
+
+/**
+ * Force delete the active tournament without archiving it.
+ * Used when admin wants to wipe a stuck/incomplete tournament.
+ */
+export async function forceDeleteActiveTournament(): Promise<void> {
+  try {
+    const active = await getActiveTournament();
+    if (!active) return;
+    await deleteTournament(active.id);
+  } catch (error) {
+    console.error('Error force deleting tournament:', error);
+    throw error;
+  }
+}
+
+/**
+ * Force delete a specific tournament by id.
+ */
+export async function forceDeleteTournament(id: string): Promise<void> {
+  try {
+    await deleteTournament(id);
+  } catch (error) {
+    console.error('Error force deleting tournament:', error);
     throw error;
   }
 }
