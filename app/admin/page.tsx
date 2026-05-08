@@ -306,14 +306,15 @@ function ResultsEntry() {
   }, []);
 
   const updateMatch = (matchId: string, updates: Partial<Match>) => {
-    if (!tournament) return;
-    setTournament({
-      ...tournament,
-      bracket: tournament.bracket.map(m => m.id === matchId ? { ...m, ...updates } : m),
+    setTournament(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        bracket: prev.bracket.map(m => m.id === matchId ? { ...m, ...updates } : m),
+      };
     });
   };
 
-  // Bulk update multiple matches at once (needed for winner propagation)
   const updateMatches = (updatesMap: Record<string, Partial<Match>>) => {
     if (!tournament) return;
     setTournament(prev => {
@@ -359,7 +360,7 @@ function ResultsEntry() {
         <BestOf3Results tournament={tournament} updateMatch={updateMatch} updateMatches={updateMatches} />
       )}
       {tournament.format === 'Single Elimination' && (
-        <SingleElimResults tournament={tournament} updateMatch={updateMatch} />
+        <SingleElimResults tournament={tournament} updateMatch={updateMatch} updateMatches={updateMatches} />
       )}
 
       <button onClick={handleSave} disabled={saving}
@@ -367,6 +368,34 @@ function ResultsEntry() {
         style={{ backgroundColor: saving ? 'var(--text-secondary)' : 'var(--gold)', color: 'var(--bg-primary)', cursor: saving ? 'not-allowed' : 'pointer' }}>
         {saving ? 'Saving...' : 'Save All Results'}
       </button>
+    </div>
+  );
+}
+
+// ─── Stream Link Input ────────────────────────────────────────────────────────
+function StreamLinkInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <span className="text-xs flex-shrink-0" style={{ color: '#ef4444' }}>🔴</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Stream link (optionnel)"
+        className="flex-1 rounded px-2 py-1 text-xs"
+        style={{
+          backgroundColor: 'var(--bg-primary)',
+          border: `1px solid ${value ? '#ef4444' : 'var(--border-color)'}`,
+          color: 'var(--text-primary)',
+        }}
+      />
+      {value && (
+        <a href={value} target="_blank" rel="noopener noreferrer"
+          className="text-xs px-2 py-1 rounded flex-shrink-0 font-bold"
+          style={{ backgroundColor: '#ef4444', color: 'white', textDecoration: 'none' }}>
+          ▶
+        </a>
+      )}
     </div>
   );
 }
@@ -456,7 +485,7 @@ function ScoreRow({ label, match, onUpdate, onToggleComplete, onUndo, disabled, 
 }
 
 // ─── Single Elimination Results ───────────────────────────────────────────────
-function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament; updateMatch: (id: string, u: Partial<Match>) => void }) {
+function SingleElimResults({ tournament, updateMatch, updateMatches }: { tournament: Tournament; updateMatch: (id: string, u: Partial<Match>) => void; updateMatches: (map: Record<string, Partial<Match>>) => void }) {
   const matchesByRound = tournament.bracket.reduce((acc, match) => {
     if (!acc[match.round]) acc[match.round] = [];
     acc[match.round].push(match);
@@ -474,32 +503,43 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
       return;
     }
     const completing = !match.completed;
-    updateMatch(match.id, { completed: completing });
+
+    // Build all updates atomically to avoid React state race conditions
+    const updates: Record<string, Partial<Match>> = {
+      [match.id]: { completed: completing },
+    };
 
     if (match.nextMatchId && completing) {
       const winner = match.scoreA[0] > match.scoreB[0] ? match.playerA : match.playerB;
-      const nextMatch = tournament.bracket.find(m => m.id === match.nextMatchId);
+      const nextMatch = tournament!.bracket.find(m => m.id === match.nextMatchId);
       if (nextMatch && winner) {
         const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
         const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
-        updateMatch(match.nextMatchId, { playerA: pA, playerB: pB });
+        updates[match.nextMatchId] = { playerA: pA, playerB: pB };
       }
     }
+
+    updateMatches(updates);
   };
 
   const handleUndo = (match: Match) => {
     if (!confirm('Annuler ce résultat et le modifier ?')) return;
-    updateMatch(match.id, { completed: false });
-    // Remove winner from next match if present
+
+    const updates: Record<string, Partial<Match>> = {
+      [match.id]: { completed: false },
+    };
+
     if (match.nextMatchId) {
       const winner = match.scoreA[0] > match.scoreB[0] ? match.playerA : match.playerB;
-      const nextMatch = tournament.bracket.find(m => m.id === match.nextMatchId);
+      const nextMatch = tournament!.bracket.find(m => m.id === match.nextMatchId);
       if (nextMatch && winner) {
         const newPA = nextMatch.playerA === winner ? null : nextMatch.playerA;
         const newPB = nextMatch.playerB === winner ? null : nextMatch.playerB;
-        updateMatch(match.nextMatchId, { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] });
+        updates[match.nextMatchId] = { playerA: newPA, playerB: newPB, completed: false, scoreA: [0], scoreB: [0] };
       }
     }
+
+    updateMatches(updates);
   };
 
   return (
@@ -521,6 +561,11 @@ function SingleElimResults({ tournament, updateMatch }: { tournament: Tournament
                     onToggleComplete={() => handleToggleComplete(match)}
                     onUndo={match.completed ? () => handleUndo(match) : undefined}
                     allowDraw={false}
+                  />
+                  {/* Stream Link */}
+                  <StreamLinkInput
+                    value={match.streamLink || ''}
+                    onChange={(v) => updateMatch(match.id, { streamLink: v })}
                   />
                 </div>
               ))}
@@ -544,7 +589,6 @@ function DoubleElimResults({
 }) {
   const bracket = tournament.bracket;
 
-  // Group aller matches by logical round
   const allerMatches = bracket.filter(m => m.matchType === 'aller').sort((a, b) => a.round - b.round);
   const roundGroups: Match[][] = [];
   let currentRoundNum = -1;
@@ -568,24 +612,18 @@ function DoubleElimResults({
     return `Round ${groupIndex + 1}`;
   };
 
-  // Aller: allow 0-0 but require a non-null score input before completing
-  // Actually for double elim, 0-0 is a valid aller/retour result (nil draw)
   const handleAllerComplete = (allerMatch: Match) => {
     if (allerMatch.completed) {
-      // UNDO
       if (!confirm('Annuler ce résultat aller ?')) return;
-      // Also undo retour if completed
       const retourMatch = bracket.find(m => m.id === allerMatch.retourMatchId);
       const updates: Record<string, Partial<Match>> = {
         [allerMatch.id]: { completed: false },
       };
       if (retourMatch?.completed) {
         updates[retourMatch.id] = { completed: false };
-        // Also undo barrage if any
         const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
         if (barrageMatch?.completed) {
           updates[barrageMatch.id] = { completed: false, playerA: null, playerB: null, scoreA: [0], scoreB: [0], barrageNeeded: false };
-          // Undo next match
           if (allerMatch.nextMatchId) {
             const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
             const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
@@ -596,7 +634,6 @@ function DoubleElimResults({
             }
           }
         } else {
-          // Undo next match from retour aggregate
           if (allerMatch.nextMatchId) {
             const aggA = allerMatch.scoreA[0] + (retourMatch?.scoreA[0] ?? 0);
             const aggB = allerMatch.scoreB[0] + (retourMatch?.scoreB[0] ?? 0);
@@ -613,7 +650,6 @@ function DoubleElimResults({
       updateMatches(updates);
       return;
     }
-    // Complete aller — 0-0 is allowed in double elim
     updateMatch(allerMatch.id, { completed: true });
   };
 
@@ -624,12 +660,10 @@ function DoubleElimResults({
     }
 
     if (retourMatch.completed) {
-      // UNDO retour
       if (!confirm('Annuler ce résultat retour ?')) return;
       const updates: Record<string, Partial<Match>> = {
         [retourMatch.id]: { completed: false },
       };
-      // Also undo barrage if completed
       const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
       if (barrageMatch?.completed) {
         updates[barrageMatch.id] = { completed: false, playerA: null, playerB: null, scoreA: [0], scoreB: [0], barrageNeeded: false };
@@ -637,7 +671,6 @@ function DoubleElimResults({
       if (barrageMatch?.barrageNeeded) {
         updates[barrageMatch.id] = { ...updates[barrageMatch.id], barrageNeeded: false, playerA: null, playerB: null };
       }
-      // Undo next match propagation
       if (allerMatch.nextMatchId) {
         const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
         const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
@@ -655,17 +688,14 @@ function DoubleElimResults({
       return;
     }
 
-    // Complete retour
-    const completing = true;
     const updates: Record<string, Partial<Match>> = {
-      [retourMatch.id]: { completed: completing },
+      [retourMatch.id]: { completed: true },
     };
 
     const aggA = allerMatch.scoreA[0] + retourMatch.scoreA[0];
     const aggB = allerMatch.scoreB[0] + retourMatch.scoreB[0];
 
     if (aggA === aggB) {
-      // Aggregate draw → trigger barrage
       if (allerMatch.barrageMatchId) {
         updates[allerMatch.barrageMatchId] = {
           playerA: allerMatch.playerA,
@@ -674,7 +704,6 @@ function DoubleElimResults({
         };
       }
     } else {
-      // Clear winner by aggregate → propagate to next round
       const winner = aggA > aggB ? allerMatch.playerA : allerMatch.playerB;
       if (allerMatch.nextMatchId && winner) {
         const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
@@ -691,7 +720,6 @@ function DoubleElimResults({
 
   const handleBarrageComplete = (allerMatch: Match, barrageMatch: Match) => {
     if (barrageMatch.completed) {
-      // UNDO barrage
       if (!confirm('Annuler le résultat du barrage ?')) return;
       const updates: Record<string, Partial<Match>> = {
         [barrageMatch.id]: { completed: false },
@@ -759,7 +787,6 @@ function DoubleElimResults({
                   <div key={allerMatch.id} className="p-4 rounded-lg space-y-3"
                     style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardCompleted ? 'var(--gold)' : 'var(--border-color)'}` }}>
 
-                    {/* Header */}
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold">
                         Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{allerMatch.playerA || 'TBD'}</span>
@@ -783,18 +810,30 @@ function DoubleElimResults({
                       onUndo={allerMatch.completed ? () => handleAllerComplete(allerMatch) : undefined}
                       allowDraw={true}
                     />
+                    {/* Stream link for Aller */}
+                    <StreamLinkInput
+                      value={allerMatch.streamLink || ''}
+                      onChange={(v) => updateMatch(allerMatch.id, { streamLink: v })}
+                    />
 
                     {/* Retour */}
                     {retourMatch && (
-                      <ScoreRow
-                        label="Retour"
-                        match={retourMatch}
-                        onUpdate={(u) => updateMatch(retourMatch.id, u)}
-                        onToggleComplete={() => handleRetourComplete(allerMatch, retourMatch)}
-                        onUndo={retourMatch.completed ? () => handleRetourComplete(allerMatch, retourMatch) : undefined}
-                        disabled={!allerMatch.completed}
-                        allowDraw={true}
-                      />
+                      <>
+                        <ScoreRow
+                          label="Retour"
+                          match={retourMatch}
+                          onUpdate={(u) => updateMatch(retourMatch.id, u)}
+                          onToggleComplete={() => handleRetourComplete(allerMatch, retourMatch)}
+                          onUndo={retourMatch.completed ? () => handleRetourComplete(allerMatch, retourMatch) : undefined}
+                          disabled={!allerMatch.completed}
+                          allowDraw={true}
+                        />
+                        {/* Stream link for Retour */}
+                        <StreamLinkInput
+                          value={retourMatch.streamLink || ''}
+                          onChange={(v) => updateMatch(retourMatch.id, { streamLink: v })}
+                        />
+                      </>
                     )}
 
                     {/* Aggregate */}
@@ -817,15 +856,22 @@ function DoubleElimResults({
 
                     {/* Barrage */}
                     {showBarrage && barrageMatch && (
-                      <ScoreRow
-                        label={`⚡ Barrage — égalité (${aggA}-${aggB}) — pas de nul`}
-                        match={barrageMatch}
-                        onUpdate={(u) => updateMatch(barrageMatch.id, u)}
-                        onToggleComplete={() => handleBarrageComplete(allerMatch, barrageMatch)}
-                        onUndo={barrageMatch.completed ? () => handleBarrageComplete(allerMatch, barrageMatch) : undefined}
-                        disabled={!retourMatch?.completed}
-                        allowDraw={false}
-                      />
+                      <>
+                        <ScoreRow
+                          label={`⚡ Barrage — égalité (${aggA}-${aggB}) — pas de nul`}
+                          match={barrageMatch}
+                          onUpdate={(u) => updateMatch(barrageMatch.id, u)}
+                          onToggleComplete={() => handleBarrageComplete(allerMatch, barrageMatch)}
+                          onUndo={barrageMatch.completed ? () => handleBarrageComplete(allerMatch, barrageMatch) : undefined}
+                          disabled={!retourMatch?.completed}
+                          allowDraw={false}
+                        />
+                        {/* Stream link for Barrage */}
+                        <StreamLinkInput
+                          value={barrageMatch.streamLink || ''}
+                          onChange={(v) => updateMatch(barrageMatch.id, { streamLink: v })}
+                        />
+                      </>
                     )}
                   </div>
                 );
@@ -873,7 +919,6 @@ function BestOf3Results({
     return `Round ${groupIndex + 1}`;
   };
 
-  // Helper: propagate a winner to next match
   const propagateWinner = (match1: Match, winner: string, updates: Record<string, Partial<Match>>) => {
     if (!match1.nextMatchId) return;
     const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
@@ -883,7 +928,6 @@ function BestOf3Results({
     updates[match1.nextMatchId] = { playerA: pA, playerB: pB };
   };
 
-  // Helper: remove a winner from next match
   const unpropagateWinner = (match1: Match, winner: string | null, updates: Record<string, Partial<Match>>) => {
     if (!match1.nextMatchId || !winner) return;
     const nextMatch = bracket.find(m => m.id === match1.nextMatchId);
@@ -895,21 +939,18 @@ function BestOf3Results({
 
   const handleMatch1Complete = (match1: Match) => {
     if (match1.completed) {
-      // UNDO match1
       if (!confirm('Annuler le Match 1 ?')) return;
       const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
       const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
       const updates: Record<string, Partial<Match>> = {
         [match1.id]: { completed: false },
       };
-      // Also undo match2 and match3
       if (match2?.completed) {
         updates[match2.id] = { completed: false, scoreA: [0], scoreB: [0] };
       }
       if (match3?.completed) {
         updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
       }
-      // Undo next round propagation
       const { winner } = getBo3Winner(bracket, match1);
       if (winner) unpropagateWinner(match1, winner, updates);
       updateMatches(updates);
@@ -925,7 +966,16 @@ function BestOf3Results({
       return;
     }
 
-    updateMatch(match1.id, { completed: true });
+    // When completing match1, also ensure match2 has correct players set
+    const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
+    const updates: Record<string, Partial<Match>> = {
+      [match1.id]: { completed: true },
+    };
+    // Set players on match2 if not already set (they should be from bracket gen but just in case)
+    if (match2 && (!match2.playerA || !match2.playerB)) {
+      updates[match2.id] = { playerA: match1.playerA, playerB: match1.playerB };
+    }
+    updateMatches(updates);
   };
 
   const handleMatch2Complete = (match1: Match, match2: Match) => {
@@ -935,7 +985,6 @@ function BestOf3Results({
     }
 
     if (match2.completed) {
-      // UNDO match2
       if (!confirm('Annuler le Match 2 ?')) return;
       const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
       const updates: Record<string, Partial<Match>> = {
@@ -944,7 +993,6 @@ function BestOf3Results({
       if (match3?.completed) {
         updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
       }
-      // Undo next round propagation
       const { winner } = getBo3Winner(bracket, match1);
       if (winner) unpropagateWinner(match1, winner, updates);
       updateMatches(updates);
@@ -968,10 +1016,8 @@ function BestOf3Results({
     };
 
     if (w1 && w1 === w2) {
-      // 2-0 → winner goes to next round
       propagateWinner(match1, w1, updates);
     } else {
-      // 1-1 → match 3 needed — set players on match3
       if (match1.bo3Match3Id) {
         updates[match1.bo3Match3Id] = {
           playerA: match1.playerA,
@@ -991,7 +1037,6 @@ function BestOf3Results({
     }
 
     if (match3.completed) {
-      // UNDO match3
       if (!confirm('Annuler le Match 3 ?')) return;
       const updates: Record<string, Partial<Match>> = {
         [match3.id]: { completed: false },
@@ -1038,7 +1083,6 @@ function BestOf3Results({
                 const winsA = [w1, w2].filter(w => w === match1.playerA).length;
                 const winsB = [w1, w2].filter(w => w === match1.playerB).length;
 
-                // Show match3 when: 1-1 after 2 matches OR match3 already played
                 const showMatch3 = (match1.completed && match2?.completed && w1 && w2 && w1 !== w2) || !!(match3?.completed) || !!(match3?.playerA);
 
                 const cardCompleted = !!winner;
@@ -1047,7 +1091,6 @@ function BestOf3Results({
                   <div key={match1.id} className="p-4 rounded-lg space-y-3"
                     style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardCompleted ? 'var(--gold)' : 'var(--border-color)'}` }}>
 
-                    {/* Header */}
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold">
                         Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{match1.playerA || 'TBD'}</span>
@@ -1074,18 +1117,30 @@ function BestOf3Results({
                       onUndo={match1.completed ? () => handleMatch1Complete(match1) : undefined}
                       allowDraw={false}
                     />
+                    {/* Stream link Match 1 */}
+                    <StreamLinkInput
+                      value={match1.streamLink || ''}
+                      onChange={(v) => updateMatch(match1.id, { streamLink: v })}
+                    />
 
                     {/* Match 2 */}
                     {match2 && (
-                      <ScoreRow
-                        label="Match 2"
-                        match={match2}
-                        onUpdate={(u) => updateMatch(match2.id, u)}
-                        onToggleComplete={() => handleMatch2Complete(match1, match2)}
-                        onUndo={match2.completed ? () => handleMatch2Complete(match1, match2) : undefined}
-                        disabled={!match1.completed}
-                        allowDraw={false}
-                      />
+                      <>
+                        <ScoreRow
+                          label="Match 2"
+                          match={match2}
+                          onUpdate={(u) => updateMatch(match2.id, u)}
+                          onToggleComplete={() => handleMatch2Complete(match1, match2)}
+                          onUndo={match2.completed ? () => handleMatch2Complete(match1, match2) : undefined}
+                          disabled={!match1.completed}
+                          allowDraw={false}
+                        />
+                        {/* Stream link Match 2 */}
+                        <StreamLinkInput
+                          value={match2.streamLink || ''}
+                          onChange={(v) => updateMatch(match2.id, { streamLink: v })}
+                        />
+                      </>
                     )}
 
                     {/* 1-1 indicator */}
@@ -1098,15 +1153,22 @@ function BestOf3Results({
 
                     {/* Match 3 */}
                     {showMatch3 && match3 && (
-                      <ScoreRow
-                        label="⚡ Match 3 — 1-1, départage — pas de nul"
-                        match={match3}
-                        onUpdate={(u) => updateMatch(match3.id, u)}
-                        onToggleComplete={() => handleMatch3Complete(match1, match3)}
-                        onUndo={match3.completed ? () => handleMatch3Complete(match1, match3) : undefined}
-                        disabled={!match2?.completed}
-                        allowDraw={false}
-                      />
+                      <>
+                        <ScoreRow
+                          label="⚡ Match 3 — 1-1, départage — pas de nul"
+                          match={match3}
+                          onUpdate={(u) => updateMatch(match3.id, u)}
+                          onToggleComplete={() => handleMatch3Complete(match1, match3)}
+                          onUndo={match3.completed ? () => handleMatch3Complete(match1, match3) : undefined}
+                          disabled={!match2?.completed}
+                          allowDraw={false}
+                        />
+                        {/* Stream link Match 3 */}
+                        <StreamLinkInput
+                          value={match3.streamLink || ''}
+                          onChange={(v) => updateMatch(match3.id, { streamLink: v })}
+                        />
+                      </>
                     )}
                   </div>
                 );
@@ -1208,8 +1270,8 @@ function FinishTournament() {
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [loading, setLoading] = useState(true);
   const [finishing, setFinishing] = useState(false);
-  const [winner, setWinner] = useState('');
-  const [runnerUp, setRunnerUp] = useState('');
+  const [manualWinner, setManualWinner] = useState('');
+  const [manualRunnerUp, setManualRunnerUp] = useState('');
 
   useEffect(() => {
     db.loadActiveTournament().then((t) => {
@@ -1218,27 +1280,24 @@ function FinishTournament() {
     });
   }, []);
 
-  const getDetectedWinner = () => {
+  // Use detectTournamentWinner which handles ALL formats correctly
+  const getDetectedWinner = (): string | null => {
     if (!tournament) return null;
-    const finalMatch = tournament.bracket.find(m => !m.nextMatchId && !m.isBarrage);
-    if (!finalMatch || !finalMatch.completed) return null;
-    return getSingleMatchWinner(finalMatch);
+    const { winner } = db.detectTournamentWinner(tournament);
+    return winner;
   };
 
-  const getDetectedRunnerUp = () => {
+  const getDetectedRunnerUp = (): string | null => {
     if (!tournament) return null;
-    const finalMatch = tournament.bracket.find(m => !m.nextMatchId && !m.isBarrage);
-    if (!finalMatch || !finalMatch.completed) return null;
-    const w = getSingleMatchWinner(finalMatch);
-    if (!w) return null;
-    return w === finalMatch.playerA ? finalMatch.playerB : finalMatch.playerA;
+    const { runnerUp } = db.detectTournamentWinner(tournament);
+    return runnerUp;
   };
 
   const handleFinish = async () => {
     if (!tournament) return;
-    const finalWinner = winner || getDetectedWinner();
-    const finalRunnerUp = runnerUp || getDetectedRunnerUp();
-    if (!finalWinner) { alert('No winner detected.'); return; }
+    const finalWinner = manualWinner || getDetectedWinner();
+    const finalRunnerUp = manualRunnerUp || getDetectedRunnerUp();
+    if (!finalWinner) { alert('No winner detected. Please enter the winner name manually.'); return; }
     if (!confirm(`Finish tournament and declare "${finalWinner}" as winner?`)) return;
 
     setFinishing(true);
@@ -1274,6 +1333,7 @@ function FinishTournament() {
       <div className="w-full rounded-full h-2" style={{ backgroundColor: 'var(--bg-secondary)' }}>
         <div className="h-2 rounded-full transition-all" style={{ width: `${(completedMatches / totalMatches) * 100}%`, backgroundColor: 'var(--gold)' }} />
       </div>
+
       {detectedWinner ? (
         <div className="p-4 rounded-lg space-y-2" style={{ backgroundColor: 'var(--gold-light)', border: '1px solid var(--gold)' }}>
           <div className="text-center">
@@ -1284,25 +1344,33 @@ function FinishTournament() {
         </div>
       ) : (
         <div className="space-y-3">
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            Le tournoi n'est pas encore terminé ou le gagnant n'a pas pu être détecté automatiquement. Vous pouvez entrer le gagnant manuellement.
+          </p>
           <div>
             <label className="block text-sm font-semibold mb-2">Nom du gagnant</label>
-            <input type="text" value={winner} onChange={(e) => setWinner(e.target.value)}
+            <input type="text" value={manualWinner} onChange={(e) => setManualWinner(e.target.value)}
               placeholder="Entrez le nom du gagnant"
               className="w-full rounded px-3 py-2 text-sm"
               style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
           </div>
           <div>
             <label className="block text-sm font-semibold mb-2">Runner-up</label>
-            <input type="text" value={runnerUp} onChange={(e) => setRunnerUp(e.target.value)}
+            <input type="text" value={manualRunnerUp} onChange={(e) => setManualRunnerUp(e.target.value)}
               placeholder="Entrez le nom du finaliste"
               className="w-full rounded px-3 py-2 text-sm"
               style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
           </div>
         </div>
       )}
-      <button onClick={handleFinish} disabled={finishing}
+
+      <button onClick={handleFinish} disabled={finishing || (!detectedWinner && !manualWinner)}
         className="w-full font-bold py-3 rounded flex items-center justify-center gap-2"
-        style={{ backgroundColor: finishing ? 'var(--text-secondary)' : '#16a34a', color: 'white', cursor: finishing ? 'not-allowed' : 'pointer' }}>
+        style={{
+          backgroundColor: finishing || (!detectedWinner && !manualWinner) ? 'var(--text-secondary)' : '#16a34a',
+          color: 'white',
+          cursor: finishing || (!detectedWinner && !manualWinner) ? 'not-allowed' : 'pointer'
+        }}>
         <Check size={18} />
         {finishing ? 'Finalisation...' : 'Terminer & Archiver le tournoi'}
       </button>

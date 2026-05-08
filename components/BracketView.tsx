@@ -9,22 +9,33 @@ interface BracketViewProps {
 export default function BracketView({ tournament }: BracketViewProps) {
   const format = tournament.format;
 
-  // ── Single Elimination ───────────────────────────────────────────────────
   if (format === 'Single Elimination') {
     return <SingleElimView tournament={tournament} />;
   }
-
-  // ── Double Elimination ───────────────────────────────────────────────────
   if (format === 'Double Elimination') {
     return <DoubleElimView tournament={tournament} />;
   }
-
-  // ── Best of 3 ────────────────────────────────────────────────────────────
   if (format === 'Best of 3') {
     return <BestOf3View tournament={tournament} />;
   }
 
   return null;
+}
+
+// ─── Stream Link Button (public view) ───────────────────────────────────────
+function StreamButton({ link }: { link: string }) {
+  if (!link) return null;
+  return (
+    <a
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded font-bold mt-1"
+      style={{ backgroundColor: '#ef4444', color: 'white', textDecoration: 'none' }}
+    >
+      🔴 Watch Live
+    </a>
+  );
 }
 
 // ─── Single Elimination View ─────────────────────────────────────────────────
@@ -81,7 +92,8 @@ function SingleElimView({ tournament }: { tournament: Tournament }) {
             {matchesByRound[round].map((match, idx) => {
               const winner = getWinner(match);
               return (
-                <div key={match.id} className="rounded-lg p-3 space-y-2" style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${match.completed ? 'var(--gold)' : 'var(--border-color)'}` }}>
+                <div key={match.id} className="rounded-lg p-3 space-y-2"
+                  style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${match.completed ? 'var(--gold)' : 'var(--border-color)'}` }}>
                   <div className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
                     Match {idx + 1}
                   </div>
@@ -110,17 +122,11 @@ function SingleElimView({ tournament }: { tournament: Tournament }) {
                       </div>
                     </div>
                   ))}
-                  <div className="flex items-center justify-center gap-2 pt-1">
+                  <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                     {(match.completed || isByeMatch(match)) && (
-                      <div className="text-xs text-center" style={{ color: 'var(--gold)' }}>✓ Terminé</div>
+                      <div className="text-xs" style={{ color: 'var(--gold)' }}>✓ Terminé</div>
                     )}
-                    {match.streamLink && (
-                      <a href={match.streamLink} target="_blank" rel="noopener noreferrer"
-                        className="text-xs px-2 py-1 rounded"
-                        style={{ backgroundColor: 'var(--gold)', color: 'var(--bg-primary)', textDecoration: 'none', fontWeight: 'bold' }}>
-                        ▶ Watch
-                      </a>
-                    )}
+                    {match.streamLink && <StreamButton link={match.streamLink} />}
                   </div>
                 </div>
               );
@@ -133,11 +139,9 @@ function SingleElimView({ tournament }: { tournament: Tournament }) {
 }
 
 // ─── Double Elimination View ─────────────────────────────────────────────────
-// Groups aller + retour + barrage into ONE card per matchup
 function DoubleElimView({ tournament }: { tournament: Tournament }) {
   const bracket = tournament.bracket;
 
-  // Collect aller matches grouped by logical round
   const allerMatches = bracket.filter(m => m.matchType === 'aller').sort((a, b) => a.round - b.round);
 
   const roundGroups: Match[][] = [];
@@ -229,19 +233,23 @@ function DoubleElimView({ tournament }: { tournament: Tournament }) {
                       completed={allerMatch.completed}
                       highlightWinner={false}
                     />
+                    {allerMatch.streamLink && <StreamButton link={allerMatch.streamLink} />}
 
                     {/* Retour sub-row */}
                     {retourMatch && (
-                      <MatchLegRow
-                        label="Retour"
-                        playerA={retourMatch.playerA}
-                        playerB={retourMatch.playerB}
-                        scoreA={retourMatch.scoreA[0]}
-                        scoreB={retourMatch.scoreB[0]}
-                        completed={retourMatch.completed}
-                        highlightWinner={false}
-                        dimmed={!allerMatch.completed}
-                      />
+                      <>
+                        <MatchLegRow
+                          label="Retour"
+                          playerA={retourMatch.playerA}
+                          playerB={retourMatch.playerB}
+                          scoreA={retourMatch.scoreA[0]}
+                          scoreB={retourMatch.scoreB[0]}
+                          completed={retourMatch.completed}
+                          highlightWinner={false}
+                          dimmed={!allerMatch.completed}
+                        />
+                        {retourMatch.streamLink && <StreamButton link={retourMatch.streamLink} />}
+                      </>
                     )}
 
                     {/* Aggregate */}
@@ -260,25 +268,20 @@ function DoubleElimView({ tournament }: { tournament: Tournament }) {
 
                     {/* Barrage */}
                     {showBarrage && barrageMatch && (
-                      <MatchLegRow
-                        label="⚡ Barrage"
-                        playerA={barrageMatch.playerA}
-                        playerB={barrageMatch.playerB}
-                        scoreA={barrageMatch.scoreA[0]}
-                        scoreB={barrageMatch.scoreB[0]}
-                        completed={barrageMatch.completed}
-                        highlightWinner={true}
-                        dimmed={!retourMatch?.completed}
-                        isBarrage
-                      />
-                    )}
-
-                    {allerMatch.streamLink && (
-                      <a href={allerMatch.streamLink} target="_blank" rel="noopener noreferrer"
-                        className="text-xs px-2 py-1 rounded block text-center mt-1"
-                        style={{ backgroundColor: 'var(--gold)', color: 'var(--bg-primary)', textDecoration: 'none', fontWeight: 'bold' }}>
-                        ▶ Watch
-                      </a>
+                      <>
+                        <MatchLegRow
+                          label="⚡ Barrage"
+                          playerA={barrageMatch.playerA}
+                          playerB={barrageMatch.playerB}
+                          scoreA={barrageMatch.scoreA[0]}
+                          scoreB={barrageMatch.scoreB[0]}
+                          completed={barrageMatch.completed}
+                          highlightWinner={true}
+                          dimmed={!retourMatch?.completed}
+                          isBarrage
+                        />
+                        {barrageMatch.streamLink && <StreamButton link={barrageMatch.streamLink} />}
+                      </>
                     )}
                   </div>
                 );
@@ -331,9 +334,9 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
     const w2 = getMatchWinner(match2);
 
     if (w1 && w2) {
-      if (w1 === w2) return w1; // 2-0
+      if (w1 === w2) return w1;
       const w3 = getMatchWinner(match3);
-      return w3; // 1-1 → match3 decides
+      return w3;
     }
     return null;
   };
@@ -394,34 +397,41 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
                       completed={match1.completed}
                       highlightWinner={true}
                     />
+                    {match1.streamLink && <StreamButton link={match1.streamLink} />}
 
                     {/* Match 2 */}
                     {match2 && (
-                      <MatchLegRow
-                        label="Match 2"
-                        playerA={match2.playerA}
-                        playerB={match2.playerB}
-                        scoreA={match2.scoreA[0]}
-                        scoreB={match2.scoreB[0]}
-                        completed={match2.completed}
-                        highlightWinner={true}
-                        dimmed={!match1.completed}
-                      />
+                      <>
+                        <MatchLegRow
+                          label="Match 2"
+                          playerA={match2.playerA}
+                          playerB={match2.playerB}
+                          scoreA={match2.scoreA[0]}
+                          scoreB={match2.scoreB[0]}
+                          completed={match2.completed}
+                          highlightWinner={true}
+                          dimmed={!match1.completed}
+                        />
+                        {match2.streamLink && <StreamButton link={match2.streamLink} />}
+                      </>
                     )}
 
                     {/* Match 3 */}
                     {showMatch3 && match3 && (
-                      <MatchLegRow
-                        label="⚡ Match 3"
-                        playerA={match3.playerA}
-                        playerB={match3.playerB}
-                        scoreA={match3.scoreA[0]}
-                        scoreB={match3.scoreB[0]}
-                        completed={match3.completed}
-                        highlightWinner={true}
-                        dimmed={!match2?.completed}
-                        isBarrage
-                      />
+                      <>
+                        <MatchLegRow
+                          label="⚡ Match 3"
+                          playerA={match3.playerA}
+                          playerB={match3.playerB}
+                          scoreA={match3.scoreA[0]}
+                          scoreB={match3.scoreB[0]}
+                          completed={match3.completed}
+                          highlightWinner={true}
+                          dimmed={!match2?.completed}
+                          isBarrage
+                        />
+                        {match3.streamLink && <StreamButton link={match3.streamLink} />}
+                      </>
                     )}
                   </div>
                 );
@@ -434,7 +444,7 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
   );
 }
 
-// ─── Match Leg Row (sub-row inside a grouped card) ───────────────────────────
+// ─── Match Leg Row ───────────────────────────────────────────────────────────
 function MatchLegRow({
   label,
   playerA,
@@ -470,35 +480,23 @@ function MatchLegRow({
           backgroundColor: 'var(--bg-secondary)',
           border: `1px solid ${completed ? (isBarrage ? '#ef4444' : '#16a34a') : 'var(--border-color)'}`,
         }}>
-        {/* Player A */}
         <span
           className="flex-1 truncate text-xs font-medium"
           style={{ color: highlightWinner && winner === playerA && playerA ? 'var(--gold)' : 'var(--text-primary)' }}>
           {playerA || 'TBD'}
         </span>
-
-        {/* Score A */}
-        <span className="font-mono font-bold text-sm w-6 text-center"
-          style={{ color: 'var(--gold)' }}>
+        <span className="font-mono font-bold text-sm w-6 text-center" style={{ color: 'var(--gold)' }}>
           {completed ? scoreA : '-'}
         </span>
-
         <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>–</span>
-
-        {/* Score B */}
-        <span className="font-mono font-bold text-sm w-6 text-center"
-          style={{ color: 'var(--gold)' }}>
+        <span className="font-mono font-bold text-sm w-6 text-center" style={{ color: 'var(--gold)' }}>
           {completed ? scoreB : '-'}
         </span>
-
-        {/* Player B */}
         <span
           className="flex-1 truncate text-xs font-medium text-right"
           style={{ color: highlightWinner && winner === playerB && playerB ? 'var(--gold)' : 'var(--text-primary)' }}>
           {playerB || 'TBD'}
         </span>
-
-        {/* Status dot */}
         {completed && (
           <span className="text-xs ml-1" style={{ color: isBarrage ? '#ef4444' : '#16a34a' }}>✓</span>
         )}
