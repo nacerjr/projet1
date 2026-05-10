@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import * as db from '@/lib/db';
 import { Tournament, Match, Player, getSingleMatchWinner, getDoubleElimWinner, getBo3Winner } from '@/lib/db';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { generateBracket } from '@/lib/bracket';
 import { v4 as uuidv4 } from 'uuid';
-import { Trophy, Trash2, Check, History, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Trophy, Trash2, Check, History, AlertTriangle, RotateCcw, Upload, ImageIcon, X, Video } from 'lucide-react';
 import { supabase, resetAllData } from '@/lib/supabase';
 
 export default function AdminPage() {
@@ -18,7 +18,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     const key = searchParams.get('key');
-    if (key === 'tournex2025') setAuthorized(true);
+    if (key === 'cup2025') setAuthorized(true);
     else router.push('/');
   }, [searchParams, router]);
 
@@ -157,40 +157,415 @@ function DangerZone() {
   );
 }
 
-// ─── General Settings ────────────────────────────────────────────────────────
+// ─── General Settings ─────────────────────────────────────────────────────────
+// Vidéo : upload local (base64, max 50MB) OU lien URL/YouTube
+// Pas de bucket Supabase Storage — tout passe par Supabase settings (base64)
+// L'ancienne vidéo/image est remplacée automatiquement à la sauvegarde
+// Aucune image par défaut — fond noir pur si rien n'est défini
+
 function GeneralSettings() {
   const [whatsappLink, setWhatsappLink] = useState('');
+
+  // Image
+  const [imageUrl, setImageUrl] = useState('');
+  const [imagePreview, setImagePreview] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Video
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoInputType, setVideoInputType] = useState<'url' | 'upload'>('url');
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoFileName, setVideoFileName] = useState('');
+  const videoInputRef = useRef<HTMLInputElement>(null);
+
   const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
-    db.loadWhatsappLink().then((link) => setWhatsappLink(link || ''));
+    Promise.all([
+      db.loadWhatsappLink(),
+      db.loadBackgroundImage(),
+      db.loadBackgroundVideo(),
+    ]).then(([link, img, vid]) => {
+      setWhatsappLink(link || '');
+      setImageUrl(img || '');
+      setImagePreview(img || '');
+      setVideoUrl(vid || '');
+      if (vid && !vid.startsWith('http') && !vid.startsWith('data:')) {
+        // URL externe déjà sauvegardée
+      }
+      if (vid && vid.startsWith('data:video')) {
+        setVideoFileName('Vidéo locale chargée');
+        setVideoInputType('upload');
+      }
+      setLoadingData(false);
+    });
   }, []);
 
+  // ── Image upload via base64 ──────────────────────────────────────────────────
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Veuillez sélectionner une image (JPG, PNG, WebP...)');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image trop lourde. Maximum 5MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const b = ev.target?.result as string;
+        setImageUrl(b);
+        setImagePreview(b);
+        setUploading(false);
+      };
+      reader.onerror = () => {
+        alert('Erreur lors de la lecture du fichier.');
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setUploading(false);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // ── Video upload via base64 — jusqu'à 50MB ───────────────────────────────────
+ const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  if (!file.type.startsWith('video/')) {
+    alert(`❌ Ce fichier n'est pas une vidéo.`);
+    if (videoInputRef.current) videoInputRef.current.value = '';
+    return;
+  }
+
+  const maxMB = 50;
+  if (file.size > maxMB * 1024 * 1024) {
+    alert(`❌ Vidéo trop lourde (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum : ${maxMB}MB.`);
+    if (videoInputRef.current) videoInputRef.current.value = '';
+    return;
+  }
+
+  setVideoUploading(true);
+  setVideoProgress(0);
+  setVideoFileName(file.name);
+
+  try {
+    // Nom unique pour éviter les collisions
+    const fileName = `home-video-${Date.now()}.${file.name.split('.').pop()}`;
+
+    const { data, error } = await supabase.storage
+      .from('videos')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: true,
+        // Supabase Storage ne supporte pas onUploadProgress directement
+        // mais on peut simuler avec un état intermédiaire
+      });
+
+    if (error) throw error;
+
+    // Récupère l'URL publique
+    const { data: urlData } = supabase.storage
+      .from('videos')
+      .getPublicUrl(fileName);
+    console.log('URL publique obtenue:', urlData.publicUrl);
+    setVideoUrl(urlData.publicUrl);
+    setVideoProgress(100);
+  } catch (err: any) {
+    alert('Erreur upload : ' + err?.message);
+    setVideoFileName('');
+  } finally {
+    setVideoUploading(false);
+    if (videoInputRef.current) videoInputRef.current.value = '';
+  }
+};
+
+  // ── Save ─────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     setLoading(true);
+    console.log('videoUrl au moment de save:', videoUrl.slice(0, 100)); // <-- ajoute ça
+
     try {
-      await db.saveWhatsappLink(whatsappLink);
-      alert('Settings saved!');
+      await Promise.all([
+        db.saveWhatsappLink(whatsappLink),
+        db.saveBackgroundImage(imageUrl || ''),
+        db.saveBackgroundVideo(videoUrl || ''),
+      ]);
+      alert('✅ Paramètres sauvegardés !');
     } catch {
-      alert('Error saving settings');
+      alert('Erreur lors de la sauvegarde.');
     } finally {
       setLoading(false);
     }
   };
 
+  if (loadingData) return <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>Chargement...</div>;
+
+  const isBase64Video = videoUrl.startsWith('data:video');
+  const isYouTubeVideo = /youtube\.com|youtu\.be/.test(videoUrl);
+  const isExternalVideo = videoUrl.startsWith('http') && !isYouTubeVideo;
+  const isSupabaseVideo = videoUrl.includes('supabase') && videoUrl.startsWith('http');
+
   return (
-    <div className="space-y-6 p-6 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-      <div>
-        <label className="block text-sm font-semibold mb-2">WhatsApp Link</label>
+    <div className="space-y-6">
+
+      {/* ── WhatsApp ────────────────────────────────────────────────────────── */}
+      <div className="p-6 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="font-bold text-sm uppercase tracking-wide" style={{ color: 'var(--gold)' }}>WhatsApp</h3>
         <input type="text" value={whatsappLink} onChange={(e) => setWhatsappLink(e.target.value)}
           placeholder="https://chat.whatsapp.com/..."
           className="w-full rounded px-3 py-2"
           style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
       </div>
-      <button onClick={handleSave} disabled={loading}
-        className="w-full font-bold py-2 rounded transition-colors"
-        style={{ backgroundColor: loading ? 'var(--text-secondary)' : 'var(--gold)', color: 'var(--bg-primary)', cursor: loading ? 'not-allowed' : 'pointer' }}>
-        {loading ? 'Saving...' : 'Save Settings'}
+
+      {/* ── Image d'accueil ─────────────────────────────────────────────────── */}
+      <div className="p-6 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <h3 className="font-bold text-sm uppercase tracking-wide" style={{ color: 'var(--gold)' }}>🖼️ Image d'accueil</h3>
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          Optionnel — fond noir si vide. La vidéo a priorité sur l'image.
+        </p>
+
+        {/* Preview */}
+        <div className="relative w-full rounded-lg overflow-hidden flex items-center justify-center"
+          style={{ height: 140, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+          {imagePreview ? (
+            <>
+              <img src={imagePreview} alt="Aperçu" className="absolute inset-0 w-full h-full object-cover"
+                onError={() => setImagePreview('')} />
+              <div className="absolute inset-0 bg-black/30" />
+              <span className="relative text-xs font-semibold px-2 py-1 rounded"
+                style={{ backgroundColor: 'rgba(0,0,0,0.6)', color: 'white' }}>Aperçu</span>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+              <ImageIcon size={28} />
+              <span className="text-xs">Aucune image — fond noir</span>
+            </div>
+          )}
+        </div>
+
+        {/* Upload image */}
+        <div>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" id="bg-upload" />
+          <label htmlFor="bg-upload"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded font-semibold"
+            style={{
+              backgroundColor: 'var(--bg-secondary)',
+              border: '2px dashed var(--border-color)',
+              color: 'var(--text-primary)',
+              cursor: uploading ? 'not-allowed' : 'pointer',
+            }}>
+            <Upload size={16} />
+            {uploading ? 'Chargement...' : 'Choisir une image (max 5MB)'}
+          </label>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-color)' }} />
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>OU URL</span>
+          <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border-color)' }} />
+        </div>
+
+        <div className="flex gap-2">
+          <input type="text"
+            value={imageUrl.startsWith('data:') ? '' : imageUrl}
+            onChange={(e) => { setImageUrl(e.target.value); setImagePreview(e.target.value); }}
+            placeholder="https://exemple.com/image.jpg"
+            className="flex-1 rounded px-3 py-2 text-sm"
+            style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+          {imageUrl && (
+            <button onClick={() => { setImageUrl(''); setImagePreview(''); }}
+              className="px-3 rounded" style={{ backgroundColor: '#dc2626', color: 'white' }}>
+              <X size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Vidéo d'accueil ─────────────────────────────────────────────────── */}
+      <div className="p-6 rounded-lg space-y-4" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-sm uppercase tracking-wide" style={{ color: 'var(--gold)' }}>🎬 Vidéo d'accueil</h3>
+          {videoUrl && (
+            <span className="text-xs px-2 py-0.5 rounded font-semibold"
+              style={{ backgroundColor: 'rgba(22,163,74,0.15)', color: '#16a34a', border: '1px solid #16a34a' }}>
+              ✓ Active
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          Autoplay · muette · en boucle · sans contrôles. Priorité sur l'image.
+        </p>
+
+        {/* Aperçu vidéo locale */}
+        {videoUrl && isBase64Video && (
+          <div className="relative rounded-lg overflow-hidden" style={{ height: 130, backgroundColor: '#000' }}>
+            <video
+              src={videoUrl}
+              autoPlay muted loop playsInline
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ opacity: 0.85 }}
+            />
+            <div className="absolute bottom-2 left-2">
+              <span className="text-xs px-2 py-1 rounded font-semibold"
+                style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: 'white' }}>
+                📁 Fichier local
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Aperçu YouTube */}
+        {videoUrl && isYouTubeVideo && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded"
+            style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <span style={{ color: '#ef4444' }}>▶</span>
+            <span className="text-xs font-semibold truncate" style={{ color: '#ef4444' }}>YouTube actif : {videoUrl.slice(0, 50)}...</span>
+          </div>
+        )}
+
+        {/* Aperçu lien externe */}
+        {videoUrl && isExternalVideo && (
+          <div className="relative rounded-lg overflow-hidden" style={{ height: 130, backgroundColor: '#000' }}>
+            <video
+              src={videoUrl}
+              autoPlay muted loop playsInline
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ opacity: 0.85 }}
+            />
+            <div className="absolute bottom-2 left-2">
+              <span className="text-xs px-2 py-1 rounded font-semibold"
+                style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: 'white' }}>
+                🔗 URL externe
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Toggle URL / Upload */}
+        <div className="flex gap-2">
+          {(['url', 'upload'] as const).map((t) => (
+            <button key={t} onClick={() => setVideoInputType(t)}
+              className="flex-1 py-2 rounded text-sm font-semibold transition-colors"
+              style={{
+                backgroundColor: videoInputType === t ? 'var(--gold)' : 'var(--bg-secondary)',
+                color: videoInputType === t ? 'var(--bg-primary)' : 'var(--text-primary)',
+              }}>
+              {t === 'url' ? '🔗 URL / YouTube' : '⬆️ Fichier local'}
+            </button>
+          ))}
+        </div>
+
+        {/* URL input */}
+        {videoInputType === 'url' && (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input type="text"
+                value={isBase64Video ? '' : videoUrl}
+                onChange={(e) => { setVideoUrl(e.target.value); setVideoFileName(''); }}
+                placeholder="YouTube, lien MP4/WebM direct..."
+                className="flex-1 rounded px-3 py-2 text-sm"
+                style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+              {videoUrl && (
+                <button onClick={() => { setVideoUrl(''); setVideoFileName(''); }}
+                  className="px-3 rounded" style={{ backgroundColor: '#dc2626', color: 'white' }}>
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              ✅ YouTube shorts/vidéo · ✅ Lien MP4/WebM direct
+            </p>
+          </div>
+        )}
+
+        {/* Upload local */}
+        {videoInputType === 'upload' && (
+          <div className="space-y-3">
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/mp4,video/webm,video/*"
+              onChange={handleVideoUpload}
+              className="hidden"
+              id="video-upload"
+              disabled={videoUploading}
+            />
+            <label
+              htmlFor="video-upload"
+              className="flex items-center justify-center gap-2 w-full py-4 rounded font-semibold"
+              style={{
+                backgroundColor: 'var(--bg-secondary)',
+                border: '2px dashed var(--border-color)',
+                color: videoUploading ? 'var(--text-secondary)' : 'var(--text-primary)',
+                cursor: videoUploading ? 'not-allowed' : 'pointer',
+              }}>
+              <Video size={18} />
+              {videoUploading
+                ? `Chargement... ${videoProgress}%`
+                : videoFileName && (isBase64Video || isSupabaseVideo)
+                  ? `✓ ${videoFileName}`
+                  : 'Choisir une vidéo (MP4 / WebM — max 50MB)'}
+            </label>
+
+            {/* Barre de progression */}
+            {videoUploading && (
+              <div className="w-full rounded-full h-2 overflow-hidden" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                <div
+                  className="h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${videoProgress}%`, backgroundColor: 'var(--gold)' }}
+                />
+              </div>
+            )}
+
+            {/* Vidéo chargée */}
+            {videoUrl && (isBase64Video || isSupabaseVideo) && !videoUploading && (              <div className="flex items-center justify-between px-3 py-2 rounded"
+                style={{ backgroundColor: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)' }}>
+                <p className="text-xs font-semibold" style={{ color: '#16a34a' }}>
+                  ✓ {videoFileName || 'Vidéo chargée'}
+                </p>
+                <button
+                  onClick={() => { setVideoUrl(''); setVideoFileName(''); }}
+                  className="text-xs px-2 py-1 rounded"
+                  style={{ backgroundColor: '#dc2626', color: 'white' }}>
+                  Supprimer
+                </button>
+              </div>
+            )}
+
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              La vidéo est stockée directement — aucun bucket requis.
+              <br />
+              <span style={{ color: 'var(--gold)' }}>
+                ⚠️ Pour des vidéos lourdes (+20MB), le chargement peut prendre quelques secondes.
+              </span>
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Save ────────────────────────────────────────────────────────────── */}
+      <button
+        onClick={handleSave}
+        disabled={loading || uploading || videoUploading}
+        className="w-full font-bold py-3 rounded transition-colors"
+        style={{
+          backgroundColor: loading || uploading || videoUploading ? 'var(--text-secondary)' : 'var(--gold)',
+          color: 'var(--bg-primary)',
+          cursor: loading || uploading || videoUploading ? 'not-allowed' : 'pointer',
+        }}>
+        {loading ? 'Sauvegarde...' : '💾 Sauvegarder les paramètres'}
       </button>
     </div>
   );
@@ -504,7 +879,6 @@ function SingleElimResults({ tournament, updateMatch, updateMatches }: { tournam
     }
     const completing = !match.completed;
 
-    // Build all updates atomically to avoid React state race conditions
     const updates: Record<string, Partial<Match>> = {
       [match.id]: { completed: completing },
     };
@@ -562,7 +936,6 @@ function SingleElimResults({ tournament, updateMatch, updateMatches }: { tournam
                     onUndo={match.completed ? () => handleUndo(match) : undefined}
                     allowDraw={false}
                   />
-                  {/* Stream Link */}
                   <StreamLinkInput
                     value={match.streamLink || ''}
                     onChange={(v) => updateMatch(match.id, { streamLink: v })}
@@ -722,7 +1095,7 @@ function DoubleElimResults({
     if (barrageMatch.completed) {
       if (!confirm('Annuler le résultat du barrage ?')) return;
       const updates: Record<string, Partial<Match>> = {
-        [barrageMatch.id]: { completed: false },
+        [barrageMatch.id]: { completed: false, scoreA: [0], scoreB: [0] },
       };
       if (allerMatch.nextMatchId) {
         const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
@@ -738,7 +1111,7 @@ function DoubleElimResults({
     }
 
     if (barrageMatch.scoreA[0] === barrageMatch.scoreB[0]) {
-      alert('Le barrage doit avoir un gagnant clair. Pas de match nul.');
+      alert('Le barrage ne peut pas se terminer sur un score nul.');
       return;
     }
     if (barrageMatch.scoreA[0] === 0 && barrageMatch.scoreB[0] === 0) {
@@ -746,19 +1119,17 @@ function DoubleElimResults({
       return;
     }
 
+    const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
     const updates: Record<string, Partial<Match>> = {
       [barrageMatch.id]: { completed: true },
     };
 
-    if (allerMatch.nextMatchId) {
-      const winner = barrageMatch.scoreA[0] > barrageMatch.scoreB[0] ? barrageMatch.playerA : barrageMatch.playerB;
-      if (winner) {
-        const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
-        if (nextMatch) {
-          const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
-          const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
-          updates[allerMatch.nextMatchId] = { playerA: pA, playerB: pB };
-        }
+    if (allerMatch.nextMatchId && winner) {
+      const nextMatch = bracket.find(m => m.id === allerMatch.nextMatchId);
+      if (nextMatch) {
+        const pA = !nextMatch.playerA ? winner : nextMatch.playerA;
+        const pB = nextMatch.playerA && !nextMatch.playerB ? winner : nextMatch.playerB;
+        updates[allerMatch.nextMatchId] = { playerA: pA, playerB: pB };
       }
     }
 
@@ -767,110 +1138,71 @@ function DoubleElimResults({
 
   return (
     <div className="space-y-8">
-      {roundGroups.map((allerGroup, groupIdx) => {
+      {roundGroups.map((group, groupIdx) => {
         const roundName = getRoundName(groupIdx, roundGroups.length);
         return (
           <div key={groupIdx}>
             <h3 className="text-sm font-bold mb-4 uppercase tracking-wide" style={{ color: 'var(--gold)' }}>{roundName}</h3>
             <div className="space-y-4">
-              {allerGroup.map((allerMatch, matchIdx) => {
+              {group.map((allerMatch, matchIdx) => {
                 const retourMatch = bracket.find(m => m.id === allerMatch.retourMatchId);
-                const barrageMatch = bracket.find(m => m.id === allerMatch.barrageMatchId);
-                const { winner, needsBarrage } = getDoubleElimWinner(bracket, allerMatch);
-                const aggA = (allerMatch.scoreA[0] || 0) + (retourMatch?.scoreA[0] || 0);
-                const aggB = (allerMatch.scoreB[0] || 0) + (retourMatch?.scoreB[0] || 0);
+                const barrageMatch = allerMatch.barrageMatchId ? bracket.find(m => m.id === allerMatch.barrageMatchId) : null;
+                const aggA = allerMatch.scoreA[0] + (retourMatch?.scoreA[0] ?? 0);
+                const aggB = allerMatch.scoreB[0] + (retourMatch?.scoreB[0] ?? 0);
+                const needsBarrage = allerMatch.completed && retourMatch?.completed && aggA === aggB;
                 const showBarrage = needsBarrage || barrageMatch?.barrageNeeded || barrageMatch?.completed;
-
-                const cardCompleted = !!winner || barrageMatch?.completed;
+                const { winner: matchWinner } = getDoubleElimWinner(bracket, allerMatch);
 
                 return (
                   <div key={allerMatch.id} className="p-4 rounded-lg space-y-3"
-                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardCompleted ? 'var(--gold)' : 'var(--border-color)'}` }}>
-
+                    style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${matchWinner ? 'var(--gold)' : 'var(--border-color)'}` }}>
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold">
                         Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{allerMatch.playerA || 'TBD'}</span>
                         <span style={{ color: 'var(--text-secondary)' }}> vs </span>
                         <span style={{ color: 'var(--gold)' }}>{allerMatch.playerB || 'TBD'}</span>
                       </span>
-                      {winner && (
-                        <span className="text-xs font-bold px-2 py-1 rounded"
-                          style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>
-                          ✓ {winner}
-                        </span>
+                      {matchWinner && (
+                        <span className="text-xs font-bold px-2 py-1 rounded" style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>✓ {matchWinner}</span>
                       )}
                     </div>
 
-                    {/* Aller */}
-                    <ScoreRow
-                      label="Aller"
-                      match={allerMatch}
-                      onUpdate={(u) => updateMatch(allerMatch.id, u)}
+                    <ScoreRow label="Aller" match={allerMatch} onUpdate={(u) => updateMatch(allerMatch.id, u)}
                       onToggleComplete={() => handleAllerComplete(allerMatch)}
                       onUndo={allerMatch.completed ? () => handleAllerComplete(allerMatch) : undefined}
-                      allowDraw={true}
-                    />
-                    {/* Stream link for Aller */}
-                    <StreamLinkInput
-                      value={allerMatch.streamLink || ''}
-                      onChange={(v) => updateMatch(allerMatch.id, { streamLink: v })}
-                    />
+                      allowDraw={true} />
+                    <StreamLinkInput value={allerMatch.streamLink || ''} onChange={(v) => updateMatch(allerMatch.id, { streamLink: v })} />
 
-                    {/* Retour */}
                     {retourMatch && (
                       <>
-                        <ScoreRow
-                          label="Retour"
-                          match={retourMatch}
-                          onUpdate={(u) => updateMatch(retourMatch.id, u)}
+                        <ScoreRow label="Retour" match={retourMatch} onUpdate={(u) => updateMatch(retourMatch.id, u)}
                           onToggleComplete={() => handleRetourComplete(allerMatch, retourMatch)}
                           onUndo={retourMatch.completed ? () => handleRetourComplete(allerMatch, retourMatch) : undefined}
-                          disabled={!allerMatch.completed}
-                          allowDraw={true}
-                        />
-                        {/* Stream link for Retour */}
-                        <StreamLinkInput
-                          value={retourMatch.streamLink || ''}
-                          onChange={(v) => updateMatch(retourMatch.id, { streamLink: v })}
-                        />
+                          disabled={!allerMatch.completed} allowDraw={true} />
+                        <StreamLinkInput value={retourMatch.streamLink || ''} onChange={(v) => updateMatch(retourMatch.id, { streamLink: v })} />
                       </>
                     )}
 
-                    {/* Aggregate */}
                     {allerMatch.completed && retourMatch?.completed && (
                       <div className="flex justify-between items-center px-3 py-2 rounded text-sm font-bold"
                         style={{ backgroundColor: 'var(--bg-secondary)' }}>
-                        <span style={{ color: aggA > aggB ? 'var(--gold)' : 'var(--text-secondary)' }}>
-                          {allerMatch.playerA}: {aggA}
-                        </span>
+                        <span style={{ color: aggA > aggB ? 'var(--gold)' : 'var(--text-secondary)' }}>{allerMatch.playerA}: {aggA}</span>
                         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Agrégat</span>
-                        <span style={{ color: aggB > aggA ? 'var(--gold)' : 'var(--text-secondary)' }}>
-                          {allerMatch.playerB}: {aggB}
-                        </span>
+                        <span style={{ color: aggB > aggA ? 'var(--gold)' : 'var(--text-secondary)' }}>{allerMatch.playerB}: {aggB}</span>
                         {needsBarrage && (
-                          <span className="text-xs px-2 py-1 rounded ml-2"
-                            style={{ backgroundColor: '#dc2626', color: 'white' }}>Barrage!</span>
+                          <span className="text-xs px-2 py-1 rounded ml-2" style={{ backgroundColor: '#dc2626', color: 'white' }}>Barrage!</span>
                         )}
                       </div>
                     )}
 
-                    {/* Barrage */}
                     {showBarrage && barrageMatch && (
                       <>
-                        <ScoreRow
-                          label={`⚡ Barrage — égalité (${aggA}-${aggB}) — pas de nul`}
-                          match={barrageMatch}
+                        <ScoreRow label={`⚡ Barrage — égalité (${aggA}-${aggB}) — pas de nul`} match={barrageMatch}
                           onUpdate={(u) => updateMatch(barrageMatch.id, u)}
                           onToggleComplete={() => handleBarrageComplete(allerMatch, barrageMatch)}
                           onUndo={barrageMatch.completed ? () => handleBarrageComplete(allerMatch, barrageMatch) : undefined}
-                          disabled={!retourMatch?.completed}
-                          allowDraw={false}
-                        />
-                        {/* Stream link for Barrage */}
-                        <StreamLinkInput
-                          value={barrageMatch.streamLink || ''}
-                          onChange={(v) => updateMatch(barrageMatch.id, { streamLink: v })}
-                        />
+                          disabled={!retourMatch?.completed} allowDraw={false} />
+                        <StreamLinkInput value={barrageMatch.streamLink || ''} onChange={(v) => updateMatch(barrageMatch.id, { streamLink: v })} />
                       </>
                     )}
                   </div>
@@ -942,125 +1274,62 @@ function BestOf3Results({
       if (!confirm('Annuler le Match 1 ?')) return;
       const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
       const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
-      const updates: Record<string, Partial<Match>> = {
-        [match1.id]: { completed: false },
-      };
-      if (match2?.completed) {
-        updates[match2.id] = { completed: false, scoreA: [0], scoreB: [0] };
-      }
-      if (match3?.completed) {
-        updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
-      }
+      const updates: Record<string, Partial<Match>> = { [match1.id]: { completed: false } };
+      if (match2?.completed) updates[match2.id] = { completed: false, scoreA: [0], scoreB: [0] };
+      if (match3?.completed) updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
       const { winner } = getBo3Winner(bracket, match1);
       if (winner) unpropagateWinner(match1, winner, updates);
       updateMatches(updates);
       return;
     }
-
-    if (match1.scoreA[0] === match1.scoreB[0]) {
-      alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.');
-      return;
-    }
-    if (match1.scoreA[0] === 0 && match1.scoreB[0] === 0) {
-      alert('Entrez un score avant de marquer terminé.');
-      return;
-    }
-
-    // When completing match1, also ensure match2 has correct players set
+    if (match1.scoreA[0] === match1.scoreB[0]) { alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.'); return; }
+    if (match1.scoreA[0] === 0 && match1.scoreB[0] === 0) { alert('Entrez un score avant de marquer terminé.'); return; }
     const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
-    const updates: Record<string, Partial<Match>> = {
-      [match1.id]: { completed: true },
-    };
-    // Set players on match2 if not already set (they should be from bracket gen but just in case)
-    if (match2 && (!match2.playerA || !match2.playerB)) {
-      updates[match2.id] = { playerA: match1.playerA, playerB: match1.playerB };
-    }
+    const updates: Record<string, Partial<Match>> = { [match1.id]: { completed: true } };
+    if (match2 && (!match2.playerA || !match2.playerB)) updates[match2.id] = { playerA: match1.playerA, playerB: match1.playerB };
     updateMatches(updates);
   };
 
   const handleMatch2Complete = (match1: Match, match2: Match) => {
-    if (!match1.completed) {
-      alert('Terminez d\'abord le match 1.');
-      return;
-    }
-
+    if (!match1.completed) { alert('Terminez d\'abord le match 1.'); return; }
     if (match2.completed) {
       if (!confirm('Annuler le Match 2 ?')) return;
       const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
-      const updates: Record<string, Partial<Match>> = {
-        [match2.id]: { completed: false },
-      };
-      if (match3?.completed) {
-        updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
-      }
+      const updates: Record<string, Partial<Match>> = { [match2.id]: { completed: false } };
+      if (match3?.completed) updates[match3.id] = { completed: false, scoreA: [0], scoreB: [0], playerA: null, playerB: null };
       const { winner } = getBo3Winner(bracket, match1);
       if (winner) unpropagateWinner(match1, winner, updates);
       updateMatches(updates);
       return;
     }
-
-    if (match2.scoreA[0] === match2.scoreB[0]) {
-      alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.');
-      return;
-    }
-    if (match2.scoreA[0] === 0 && match2.scoreB[0] === 0) {
-      alert('Entrez un score avant de marquer terminé.');
-      return;
-    }
-
+    if (match2.scoreA[0] === match2.scoreB[0]) { alert('Chaque match Bo3 doit avoir un gagnant clair. Pas de match nul.'); return; }
+    if (match2.scoreA[0] === 0 && match2.scoreB[0] === 0) { alert('Entrez un score avant de marquer terminé.'); return; }
     const w1 = getSingleMatchWinner(match1);
     const w2 = match2.scoreA[0] > match2.scoreB[0] ? match1.playerA : match1.playerB;
-
-    const updates: Record<string, Partial<Match>> = {
-      [match2.id]: { completed: true },
-    };
-
+    const updates: Record<string, Partial<Match>> = { [match2.id]: { completed: true } };
     if (w1 && w1 === w2) {
       propagateWinner(match1, w1, updates);
     } else {
-      if (match1.bo3Match3Id) {
-        updates[match1.bo3Match3Id] = {
-          playerA: match1.playerA,
-          playerB: match1.playerB,
-        };
-      }
+      if (match1.bo3Match3Id) updates[match1.bo3Match3Id] = { playerA: match1.playerA, playerB: match1.playerB };
     }
-
     updateMatches(updates);
   };
 
   const handleMatch3Complete = (match1: Match, match3: Match) => {
     const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
-    if (!match2?.completed) {
-      alert('Terminez d\'abord le match 2.');
-      return;
-    }
-
+    if (!match2?.completed) { alert('Terminez d\'abord le match 2.'); return; }
     if (match3.completed) {
       if (!confirm('Annuler le Match 3 ?')) return;
-      const updates: Record<string, Partial<Match>> = {
-        [match3.id]: { completed: false },
-      };
+      const updates: Record<string, Partial<Match>> = { [match3.id]: { completed: false } };
       const winner = getSingleMatchWinner(match3);
       if (winner) unpropagateWinner(match1, winner, updates);
       updateMatches(updates);
       return;
     }
-
-    if (match3.scoreA[0] === match3.scoreB[0]) {
-      alert('Le match 3 doit avoir un gagnant clair. Pas de match nul.');
-      return;
-    }
-    if (match3.scoreA[0] === 0 && match3.scoreB[0] === 0) {
-      alert('Entrez un score avant de marquer terminé.');
-      return;
-    }
-
+    if (match3.scoreA[0] === match3.scoreB[0]) { alert('Le match 3 doit avoir un gagnant clair. Pas de match nul.'); return; }
+    if (match3.scoreA[0] === 0 && match3.scoreB[0] === 0) { alert('Entrez un score avant de marquer terminé.'); return; }
     const winner = match3.scoreA[0] > match3.scoreB[0] ? match3.playerA : match3.playerB;
-    const updates: Record<string, Partial<Match>> = {
-      [match3.id]: { completed: true },
-    };
-
+    const updates: Record<string, Partial<Match>> = { [match3.id]: { completed: true } };
     if (winner) propagateWinner(match1, winner, updates);
     updateMatches(updates);
   };
@@ -1077,20 +1346,16 @@ function BestOf3Results({
                 const match2 = bracket.find(m => m.id === match1.bo3Match2Id);
                 const match3 = bracket.find(m => m.id === match1.bo3Match3Id);
                 const { winner } = getBo3Winner(bracket, match1);
-
                 const w1 = getSingleMatchWinner(match1);
                 const w2 = match2 ? getSingleMatchWinner(match2) : null;
                 const winsA = [w1, w2].filter(w => w === match1.playerA).length;
                 const winsB = [w1, w2].filter(w => w === match1.playerB).length;
-
                 const showMatch3 = (match1.completed && match2?.completed && w1 && w2 && w1 !== w2) || !!(match3?.completed) || !!(match3?.playerA);
-
                 const cardCompleted = !!winner;
 
                 return (
                   <div key={match1.id} className="p-4 rounded-lg space-y-3"
                     style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardCompleted ? 'var(--gold)' : 'var(--border-color)'}` }}>
-
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold">
                         Match {matchIdx + 1}: <span style={{ color: 'var(--gold)' }}>{match1.playerA || 'TBD'}</span>
@@ -1098,76 +1363,41 @@ function BestOf3Results({
                         <span style={{ color: 'var(--gold)' }}>{match1.playerB || 'TBD'}</span>
                       </span>
                       {winner ? (
-                        <span className="text-xs font-bold px-2 py-1 rounded"
-                          style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>✓ {winner}</span>
+                        <span className="text-xs font-bold px-2 py-1 rounded" style={{ backgroundColor: 'var(--gold-light)', color: 'var(--gold)' }}>✓ {winner}</span>
                       ) : match1.completed && match2?.completed ? (
-                        <span className="text-xs font-bold px-2 py-1 rounded"
-                          style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
-                          Bo3: {winsA}-{winsB}
-                        </span>
+                        <span className="text-xs font-bold px-2 py-1 rounded" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>Bo3: {winsA}-{winsB}</span>
                       ) : null}
                     </div>
 
-                    {/* Match 1 */}
-                    <ScoreRow
-                      label="Match 1"
-                      match={match1}
-                      onUpdate={(u) => updateMatch(match1.id, u)}
+                    <ScoreRow label="Match 1" match={match1} onUpdate={(u) => updateMatch(match1.id, u)}
                       onToggleComplete={() => handleMatch1Complete(match1)}
-                      onUndo={match1.completed ? () => handleMatch1Complete(match1) : undefined}
-                      allowDraw={false}
-                    />
-                    {/* Stream link Match 1 */}
-                    <StreamLinkInput
-                      value={match1.streamLink || ''}
-                      onChange={(v) => updateMatch(match1.id, { streamLink: v })}
-                    />
+                      onUndo={match1.completed ? () => handleMatch1Complete(match1) : undefined} allowDraw={false} />
+                    <StreamLinkInput value={match1.streamLink || ''} onChange={(v) => updateMatch(match1.id, { streamLink: v })} />
 
-                    {/* Match 2 */}
                     {match2 && (
                       <>
-                        <ScoreRow
-                          label="Match 2"
-                          match={match2}
-                          onUpdate={(u) => updateMatch(match2.id, u)}
+                        <ScoreRow label="Match 2" match={match2} onUpdate={(u) => updateMatch(match2.id, u)}
                           onToggleComplete={() => handleMatch2Complete(match1, match2)}
                           onUndo={match2.completed ? () => handleMatch2Complete(match1, match2) : undefined}
-                          disabled={!match1.completed}
-                          allowDraw={false}
-                        />
-                        {/* Stream link Match 2 */}
-                        <StreamLinkInput
-                          value={match2.streamLink || ''}
-                          onChange={(v) => updateMatch(match2.id, { streamLink: v })}
-                        />
+                          disabled={!match1.completed} allowDraw={false} />
+                        <StreamLinkInput value={match2.streamLink || ''} onChange={(v) => updateMatch(match2.id, { streamLink: v })} />
                       </>
                     )}
 
-                    {/* 1-1 indicator */}
                     {match1.completed && match2?.completed && !winner && w1 && w2 && w1 !== w2 && (
-                      <div className="text-xs text-center py-1 px-2 rounded"
-                        style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
+                      <div className="text-xs text-center py-1 px-2 rounded" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
                         1-1 → Match 3 requis!
                       </div>
                     )}
 
-                    {/* Match 3 */}
                     {showMatch3 && match3 && (
                       <>
-                        <ScoreRow
-                          label="⚡ Match 3 — 1-1, départage — pas de nul"
-                          match={match3}
+                        <ScoreRow label="⚡ Match 3 — 1-1, départage — pas de nul" match={match3}
                           onUpdate={(u) => updateMatch(match3.id, u)}
                           onToggleComplete={() => handleMatch3Complete(match1, match3)}
                           onUndo={match3.completed ? () => handleMatch3Complete(match1, match3) : undefined}
-                          disabled={!match2?.completed}
-                          allowDraw={false}
-                        />
-                        {/* Stream link Match 3 */}
-                        <StreamLinkInput
-                          value={match3.streamLink || ''}
-                          onChange={(v) => updateMatch(match3.id, { streamLink: v })}
-                        />
+                          disabled={!match2?.completed} allowDraw={false} />
+                        <StreamLinkInput value={match3.streamLink || ''} onChange={(v) => updateMatch(match3.id, { streamLink: v })} />
                       </>
                     )}
                   </div>
@@ -1241,9 +1471,17 @@ function PlayersManagement() {
         {players.map((player) => (
           <div key={player.id} className="flex items-center gap-3 p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)' }}>
             <div className="flex-1 min-w-0">
-              <div className="font-semibold truncate">{player.name}</div>
-              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>🏆 {player.trophies} wins · 🥈 {player.second_place} finals</div>
-            </div>
+                  <div className="font-semibold truncate">{player.name}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>🏆 {player.trophies} wins · 🥈 {player.second_place} finals</div>
+                  <input
+                    type="text"
+                    value={(player as any).social_link || ''}
+                    onChange={(e) => handleUpdatePlayer(player.id, { social_link: e.target.value } as any)}
+                    placeholder="TikTok, Instagram, YouTube..."
+                    className="mt-1 w-full rounded px-2 py-0.5 text-xs"
+                    style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                  />
+                </div>
             <input type="number" value={player.trophies}
               onChange={(e) => handleUpdatePlayer(player.id, { trophies: parseInt(e.target.value) || 0 })}
               className="w-14 rounded px-2 py-1 text-sm text-center"
@@ -1274,32 +1512,39 @@ function FinishTournament() {
   const [manualRunnerUp, setManualRunnerUp] = useState('');
 
   useEffect(() => {
-    db.loadActiveTournament().then((t) => {
-      setTournament(t);
-      setLoading(false);
-    });
+    db.loadActiveTournament().then((t) => { setTournament(t); setLoading(false); });
   }, []);
 
-  // Use detectTournamentWinner which handles ALL formats correctly
-  const getDetectedWinner = (): string | null => {
-    if (!tournament) return null;
-    const { winner } = db.detectTournamentWinner(tournament);
-    return winner;
+  const getMatchProgress = (t: Tournament) => {
+    const bracket = t.bracket;
+    let required = 0;
+    let completed = 0;
+    if (t.format === 'Double Elimination') {
+      bracket.forEach(m => {
+        if (m.matchType === 'aller' || m.matchType === 'retour') { required++; if (m.completed) completed++; }
+        else if (m.matchType === 'barrage' && m.completed) { required++; completed++; }
+      });
+    } else if (t.format === 'Best of 3') {
+      bracket.forEach(m => {
+        if (m.matchType === 'bo3_match1' || m.matchType === 'bo3_match2') { required++; if (m.completed) completed++; }
+        else if (m.matchType === 'bo3_match3' && m.completed) { required++; completed++; }
+      });
+    } else {
+      required = bracket.length;
+      completed = bracket.filter(m => m.completed).length;
+    }
+    return { required, completed };
   };
 
-  const getDetectedRunnerUp = (): string | null => {
-    if (!tournament) return null;
-    const { runnerUp } = db.detectTournamentWinner(tournament);
-    return runnerUp;
-  };
+  const detectedWinner = tournament ? db.detectTournamentWinner(tournament).winner : null;
+  const detectedRunnerUp = tournament ? db.detectTournamentWinner(tournament).runnerUp : null;
 
   const handleFinish = async () => {
     if (!tournament) return;
-    const finalWinner = manualWinner || getDetectedWinner();
-    const finalRunnerUp = manualRunnerUp || getDetectedRunnerUp();
-    if (!finalWinner) { alert('No winner detected. Please enter the winner name manually.'); return; }
-    if (!confirm(`Finish tournament and declare "${finalWinner}" as winner?`)) return;
-
+    const finalWinner = manualWinner.trim() || detectedWinner;
+    const finalRunnerUp = manualRunnerUp.trim() || detectedRunnerUp;
+    if (!finalWinner) { alert('Aucun gagnant détecté. Entrez le nom du vainqueur manuellement.'); return; }
+    if (!confirm(`Terminer le tournoi et déclarer "${finalWinner}" vainqueur ?`)) return;
     setFinishing(true);
     try {
       const updated = { ...tournament, winner: finalWinner };
@@ -1307,72 +1552,68 @@ function FinishTournament() {
       await db.finalizeTournament({ ...updated, runner_up: finalRunnerUp || undefined });
       await db.incrementPlayerWins(finalWinner);
       if (finalRunnerUp) await db.incrementPlayerFinals(finalRunnerUp);
-      alert(`✅ Tournament finished! Winner: ${finalWinner}`);
       setTournament(null);
+      alert(`✅ Tournoi terminé ! Vainqueur : ${finalWinner}`);
     } catch (error) {
-      alert('Error finishing tournament: ' + (error as any).message);
+      alert('Erreur : ' + (error as any).message);
     } finally {
       setFinishing(false);
     }
   };
 
-  if (loading) return <div className="text-center py-8">Loading...</div>;
-  if (!tournament) return <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>No active tournament to finish.</div>;
+  if (loading) return <div className="text-center py-8">Chargement...</div>;
+  if (!tournament) return <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>Aucun tournoi actif à terminer.</div>;
 
-  const detectedWinner = getDetectedWinner();
-  const detectedRunnerUp = getDetectedRunnerUp();
-  const completedMatches = tournament.bracket.filter(m => m.completed).length;
-  const totalMatches = tournament.bracket.length;
+  const { required, completed } = getMatchProgress(tournament);
+  const pct = required > 0 ? Math.round((completed / required) * 100) : 0;
+  const allDone = completed >= required;
 
   return (
-    <div className="space-y-6 p-6 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+    <div className="space-y-5 p-6 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
       <div>
-        <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--gold)' }}>{tournament.name}</h3>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{completedMatches}/{totalMatches} matches completed</p>
+        <h3 className="font-bold text-lg" style={{ color: 'var(--gold)' }}>{tournament.name}</h3>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{tournament.format} · {tournament.size} joueurs</p>
       </div>
-      <div className="w-full rounded-full h-2" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-        <div className="h-2 rounded-full transition-all" style={{ width: `${(completedMatches / totalMatches) * 100}%`, backgroundColor: 'var(--gold)' }} />
-      </div>
-
-      {detectedWinner ? (
-        <div className="p-4 rounded-lg space-y-2" style={{ backgroundColor: 'var(--gold-light)', border: '1px solid var(--gold)' }}>
-          <div className="text-center">
-            <Trophy size={32} className="mx-auto mb-2" style={{ color: 'var(--gold)' }} />
-            <p className="text-xl font-bold" style={{ color: 'var(--gold)' }}>{detectedWinner}</p>
-            {detectedRunnerUp && <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Runner-up: {detectedRunnerUp}</p>}
-          </div>
+      <div>
+        <div className="flex justify-between text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>
+          <span>{completed} / {required} matchs joués</span>
+          <span>{pct}%</span>
         </div>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Le tournoi n'est pas encore terminé ou le gagnant n'a pas pu être détecté automatiquement. Vous pouvez entrer le gagnant manuellement.
-          </p>
+        <div className="w-full rounded-full h-2" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+          <div className="h-2 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: allDone ? '#16a34a' : 'var(--gold)' }} />
+        </div>
+      </div>
+      {detectedWinner && (
+        <div className="p-4 rounded-lg text-center space-y-1" style={{ backgroundColor: 'var(--gold-light)', border: '1px solid var(--gold)' }}>
+          <div className="text-2xl">🏆</div>
+          <p className="text-xl font-bold" style={{ color: 'var(--gold)' }}>{detectedWinner}</p>
+          {detectedRunnerUp && <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>🥈 {detectedRunnerUp}</p>}
+        </div>
+      )}
+      {!detectedWinner && (
+        <div className="space-y-3 p-3 rounded" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Gagnant non détecté automatiquement. Saisissez-le manuellement :</p>
           <div>
-            <label className="block text-sm font-semibold mb-2">Nom du gagnant</label>
-            <input type="text" value={manualWinner} onChange={(e) => setManualWinner(e.target.value)}
-              placeholder="Entrez le nom du gagnant"
+            <label className="block text-xs font-semibold mb-1">Vainqueur</label>
+            <input type="text" value={manualWinner} onChange={(e) => setManualWinner(e.target.value)} placeholder="Nom du vainqueur"
               className="w-full rounded px-3 py-2 text-sm"
-              style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+              style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
           </div>
           <div>
-            <label className="block text-sm font-semibold mb-2">Runner-up</label>
-            <input type="text" value={manualRunnerUp} onChange={(e) => setManualRunnerUp(e.target.value)}
-              placeholder="Entrez le nom du finaliste"
+            <label className="block text-xs font-semibold mb-1">Finaliste (runner-up)</label>
+            <input type="text" value={manualRunnerUp} onChange={(e) => setManualRunnerUp(e.target.value)} placeholder="Nom du finaliste"
               className="w-full rounded px-3 py-2 text-sm"
-              style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
+              style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} />
           </div>
         </div>
       )}
-
-      <button onClick={handleFinish} disabled={finishing || (!detectedWinner && !manualWinner)}
-        className="w-full font-bold py-3 rounded flex items-center justify-center gap-2"
+      <button onClick={handleFinish} disabled={finishing || (!detectedWinner && !manualWinner.trim())}
+        className="w-full font-bold py-3 rounded flex items-center justify-center gap-2 text-white transition-colors"
         style={{
-          backgroundColor: finishing || (!detectedWinner && !manualWinner) ? 'var(--text-secondary)' : '#16a34a',
-          color: 'white',
-          cursor: finishing || (!detectedWinner && !manualWinner) ? 'not-allowed' : 'pointer'
+          backgroundColor: finishing || (!detectedWinner && !manualWinner.trim()) ? 'var(--text-secondary)' : '#16a34a',
+          cursor: finishing || (!detectedWinner && !manualWinner.trim()) ? 'not-allowed' : 'pointer',
         }}>
-        <Check size={18} />
-        {finishing ? 'Finalisation...' : 'Terminer & Archiver le tournoi'}
+        {finishing ? '⏳ Finalisation...' : '🏆 Terminer le tournoi'}
       </button>
     </div>
   );
@@ -1383,13 +1624,12 @@ function HistoryManagement() {
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('historical_tournaments')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('historical_tournaments').select('*').order('created_at', { ascending: false });
     if (!error && data) setTournaments(data);
     setLoading(false);
   };
@@ -1409,6 +1649,33 @@ function HistoryManagement() {
     }
   };
 
+  const updateMatchStreamLink = (tournamentId: string, matchId: string, link: string) => {
+    setTournaments(prev => prev.map(t => {
+      if (t.id !== tournamentId) return t;
+      return {
+        ...t,
+        bracket: t.bracket.map((m: any) => m.id === matchId ? { ...m, streamLink: link } : m),
+      };
+    }));
+  };
+
+  const handleSaveStreamLinks = async (tournament: any) => {
+    setSavingId(tournament.id);
+    try {
+      const { error } = await supabase
+        .from('historical_tournaments')
+        .update({ bracket: tournament.bracket })
+        .eq('id', tournament.id);
+      if (error) throw error;
+      alert('✅ Liens sauvegardés !');
+      setEditingId(null);
+    } catch (err: any) {
+      alert('Erreur : ' + err.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   if (loading) return <div className="text-center py-8">Loading history...</div>;
 
   return (
@@ -1416,32 +1683,115 @@ function HistoryManagement() {
       {tournaments.length === 0 ? (
         <div className="text-center py-8" style={{ color: 'var(--text-secondary)' }}>No finished tournaments yet.</div>
       ) : (
-        tournaments.map(t => (
-          <div key={t.id} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <p className="font-bold truncate">{t.name}</p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t.format} · {t.size} players{t.date && ` · ${new Date(t.date).toLocaleDateString()}`}
-                </p>
-                {t.winner && (
-                  <div className="flex items-center gap-1 mt-2" style={{ color: 'var(--gold)' }}>
-                    <Trophy size={14} />
-                    <span className="font-semibold text-sm">{t.winner}</span>
-                  </div>
-                )}
-                {t.runner_up && (
-                  <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>🥈 {t.runner_up}</div>
-                )}
+        tournaments.map(t => {
+          const isEditing = editingId === t.id;
+          const matches: any[] = t.bracket || [];
+
+          return (
+            <div key={t.id} className="rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+              {/* Header */}
+              <div className="p-4 flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold truncate">{t.name}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                    {t.format} · {t.size} players{t.date && ` · ${new Date(t.date).toLocaleDateString()}`}
+                  </p>
+                  {t.winner && (
+                    <div className="flex items-center gap-1 mt-2" style={{ color: 'var(--gold)' }}>
+                      <Trophy size={14} />
+                      <span className="font-semibold text-sm">{t.winner}</span>
+                    </div>
+                  )}
+                  {t.runner_up && <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>🥈 {t.runner_up}</div>}
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => setEditingId(isEditing ? null : t.id)}
+                    className="px-3 py-1.5 rounded text-xs font-semibold"
+                    style={{ backgroundColor: isEditing ? 'var(--bg-secondary)' : 'var(--gold)', color: isEditing ? 'var(--text-primary)' : 'var(--bg-primary)' }}>
+                    {isEditing ? 'Fermer' : '🔗 Stream links'}
+                  </button>
+                  <button onClick={() => handleDelete(t.id, t.name)} disabled={deletingId === t.id}
+                    className="p-1.5 rounded flex-shrink-0" style={{ backgroundColor: '#dc2626', color: 'white' }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-              <button onClick={() => handleDelete(t.id, t.name)} disabled={deletingId === t.id}
-                className="p-1.5 rounded flex-shrink-0"
-                style={{ backgroundColor: '#dc2626', color: 'white' }}>
-                <Trash2 size={14} />
-              </button>
+
+              {/* Stream links editor */}
+              {isEditing && (
+                <div className="px-4 pb-4 space-y-3" style={{ borderTop: '1px solid var(--border-color)' }}>
+                  <p className="text-xs pt-3 font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                    Modifier les liens de stream pour chaque match :
+                  </p>
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
+                    {matches
+                      .filter((m: any) => !['retour', 'barrage', 'bo3_match2', 'bo3_match3'].includes(m.matchType) || m.matchType === undefined)
+                      .map((m: any) => {
+                        const label = m.matchType === 'aller'
+                          ? `${m.playerA || 'TBD'} vs ${m.playerB || 'TBD'} (Aller)`
+                          : m.matchType === 'bo3_match1'
+                          ? `${m.playerA || 'TBD'} vs ${m.playerB || 'TBD'} (Bo3)`
+                          : `${m.playerA || 'TBD'} vs ${m.playerB || 'TBD'}`;
+
+                        // Pour Double Elim : afficher aussi retour/barrage sous l'aller
+                        const subMatches: any[] = [];
+                        if (m.matchType === 'aller') {
+                          const retour = matches.find((x: any) => x.id === m.retourMatchId);
+                          const barrage = matches.find((x: any) => x.id === m.barrageMatchId);
+                          if (retour) subMatches.push({ ...retour, subLabel: 'Retour' });
+                          if (barrage) subMatches.push({ ...barrage, subLabel: 'Barrage' });
+                        }
+                        if (m.matchType === 'bo3_match1') {
+                          const m2 = matches.find((x: any) => x.id === m.bo3Match2Id);
+                          const m3 = matches.find((x: any) => x.id === m.bo3Match3Id);
+                          if (m2) subMatches.push({ ...m2, subLabel: 'Match 2' });
+                          if (m3) subMatches.push({ ...m3, subLabel: 'Match 3' });
+                        }
+
+                        return (
+                          <div key={m.id} className="p-2 rounded space-y-1.5" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                            <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{label}</p>
+                            <div className="flex gap-2 items-center">
+                              <span className="text-xs flex-shrink-0" style={{ color: '#ef4444' }}>🔴</span>
+                              <input
+                                type="text"
+                                value={m.streamLink || ''}
+                                onChange={(e) => updateMatchStreamLink(t.id, m.id, e.target.value)}
+                                placeholder="https://..."
+                                className="flex-1 rounded px-2 py-1 text-xs"
+                                style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                              />
+                            </div>
+                            {subMatches.map((sub: any) => (
+                              <div key={sub.id} className="flex gap-2 items-center pl-3">
+                                <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>{sub.subLabel}</span>
+                                <input
+                                  type="text"
+                                  value={sub.streamLink || ''}
+                                  onChange={(e) => updateMatchStreamLink(t.id, sub.id, e.target.value)}
+                                  placeholder="https://..."
+                                  className="flex-1 rounded px-2 py-1 text-xs"
+                                  style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                  </div>
+                  <button
+                    onClick={() => handleSaveStreamLinks(t)}
+                    disabled={savingId === t.id}
+                    className="w-full py-2 rounded font-semibold text-sm"
+                    style={{ backgroundColor: savingId === t.id ? 'var(--text-secondary)' : 'var(--gold)', color: 'var(--bg-primary)' }}>
+                    {savingId === t.id ? 'Sauvegarde...' : '💾 Sauvegarder les liens'}
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );

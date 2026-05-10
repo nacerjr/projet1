@@ -24,14 +24,14 @@ export interface Tournament {
 }
 
 export interface Player {
-  id?: string;
+  id: string;
   name: string;
   trophies: number;
   second_place: number;
+  social_link?: string;
   created_at?: string;
   updated_at?: string;
 }
-
 export interface Settings {
   id?: number;
   key: string;
@@ -222,7 +222,7 @@ export async function setSetting(key: string, value: any) {
     .single();
   
   if (error) {
-    console.error('Error setting configuration:', error);
+    console.error('Error setting configuration:', JSON.stringify(error), error.message, error.code, error.details, error.hint);
     throw error;
   }
   return data;

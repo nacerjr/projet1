@@ -43,6 +43,7 @@ export interface Player {
   name: string;
   trophies: number;
   second_place: number;
+  social_link?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -387,5 +388,11 @@ export async function loadNextTournamentDate(): Promise<string> { return loadSet
 export async function saveNextTournamentDate(date: string): Promise<void> { return saveSetting('nextTournamentDate', date); }
 export async function loadWhatsappLink(): Promise<string> { return loadSetting('whatsappLink', ''); }
 export async function saveWhatsappLink(link: string): Promise<void> { return saveSetting('whatsappLink', link); }
-export async function loadBackgroundImage(): Promise<string> { return loadSetting('backgroundImage', '/tournament-bg.jpg'); }
+export async function loadBackgroundImage(): Promise<string> { return loadSetting('backgroundImage', ''); }
 export async function saveBackgroundImage(url: string): Promise<void> { return saveSetting('backgroundImage', url); }
+export async function loadBackgroundVideo(): Promise<string> {
+  return loadSetting('backgroundVideo', '');
+}
+export async function saveBackgroundVideo(url: string): Promise<void> {
+  return saveSetting('backgroundVideo', url);
+}

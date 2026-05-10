@@ -206,6 +206,11 @@ function DoubleElimView({ tournament }: { tournament: Tournament }) {
 
                 const cardDone = !!winner;
 
+                // FIX: Pour le retour, les joueurs sont TOUJOURS les mêmes que l'aller.
+                // On utilise allerMatch.playerA/B comme fallback si retourMatch.playerA/B est null.
+                const retourPlayerA = retourMatch?.playerA ?? allerMatch.playerA;
+                const retourPlayerB = retourMatch?.playerB ?? allerMatch.playerB;
+
                 return (
                   <div key={allerMatch.id} className="rounded-lg p-3 space-y-2"
                     style={{ backgroundColor: 'var(--bg-card)', border: `1px solid ${cardDone ? 'var(--gold)' : 'var(--border-color)'}` }}>
@@ -213,7 +218,9 @@ function DoubleElimView({ tournament }: { tournament: Tournament }) {
                     {/* Match header */}
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                        Match {matchIdx + 1}
+                        Match {matchIdx + 1} — <span style={{ color: 'var(--text-primary)' }}>{allerMatch.playerA || 'TBD'}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}> vs </span>
+                        <span style={{ color: 'var(--text-primary)' }}>{allerMatch.playerB || 'TBD'}</span>
                       </span>
                       {winner && (
                         <span className="text-xs font-bold px-2 py-0.5 rounded"
@@ -235,13 +242,13 @@ function DoubleElimView({ tournament }: { tournament: Tournament }) {
                     />
                     {allerMatch.streamLink && <StreamButton link={allerMatch.streamLink} />}
 
-                    {/* Retour sub-row */}
+                    {/* Retour sub-row — FIX: toujours afficher les joueurs de l'aller */}
                     {retourMatch && (
                       <>
                         <MatchLegRow
                           label="Retour"
-                          playerA={retourMatch.playerA}
-                          playerB={retourMatch.playerB}
+                          playerA={retourPlayerA}
+                          playerB={retourPlayerB}
                           scoreA={retourMatch.scoreA[0]}
                           scoreB={retourMatch.scoreB[0]}
                           completed={retourMatch.completed}
@@ -271,8 +278,8 @@ function DoubleElimView({ tournament }: { tournament: Tournament }) {
                       <>
                         <MatchLegRow
                           label="⚡ Barrage"
-                          playerA={barrageMatch.playerA}
-                          playerB={barrageMatch.playerB}
+                          playerA={barrageMatch.playerA ?? allerMatch.playerA}
+                          playerB={barrageMatch.playerB ?? allerMatch.playerB}
                           scoreA={barrageMatch.scoreA[0]}
                           scoreB={barrageMatch.scoreB[0]}
                           completed={barrageMatch.completed}
@@ -361,9 +368,14 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
                 const winsA = [w1, w2].filter(w => w === match1.playerA).length;
                 const winsB = [w1, w2].filter(w => w === match1.playerB).length;
 
-                const showMatch3 = (match1.completed && match2?.completed && w1 && w2 && w1 !== w2)
-                  || !!match3?.completed
-                  || !!match3?.playerA;
+                // FIX: Match 3 est toujours entre les mêmes joueurs — on ne dépend plus de match3.playerA
+                // On affiche dès que match1 et match2 sont complétés et que les gagnants diffèrent (1-1)
+                const is11 = match1.completed && match2?.completed && w1 && w2 && w1 !== w2;
+                const showMatch3 = is11 || !!match3?.completed;
+
+                // FIX: Pour match2 et match3, les joueurs sont TOUJOURS ceux de match1
+                const p1A = match1.playerA;
+                const p1B = match1.playerB;
 
                 return (
                   <div key={match1.id} className="rounded-lg p-3 space-y-2"
@@ -372,7 +384,9 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
                     {/* Header */}
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                        Match {matchIdx + 1}
+                        Match {matchIdx + 1} — <span style={{ color: 'var(--text-primary)' }}>{p1A || 'TBD'}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}> vs </span>
+                        <span style={{ color: 'var(--text-primary)' }}>{p1B || 'TBD'}</span>
                       </span>
                       {seriesWinner ? (
                         <span className="text-xs font-bold px-2 py-0.5 rounded"
@@ -390,8 +404,8 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
                     {/* Match 1 */}
                     <MatchLegRow
                       label="Match 1"
-                      playerA={match1.playerA}
-                      playerB={match1.playerB}
+                      playerA={p1A}
+                      playerB={p1B}
                       scoreA={match1.scoreA[0]}
                       scoreB={match1.scoreB[0]}
                       completed={match1.completed}
@@ -399,13 +413,13 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
                     />
                     {match1.streamLink && <StreamButton link={match1.streamLink} />}
 
-                    {/* Match 2 */}
+                    {/* Match 2 — FIX: toujours afficher p1A/p1B même si match2.playerA est null */}
                     {match2 && (
                       <>
                         <MatchLegRow
                           label="Match 2"
-                          playerA={match2.playerA}
-                          playerB={match2.playerB}
+                          playerA={match2.playerA ?? p1A}
+                          playerB={match2.playerB ?? p1B}
                           scoreA={match2.scoreA[0]}
                           scoreB={match2.scoreB[0]}
                           completed={match2.completed}
@@ -416,13 +430,13 @@ function BestOf3View({ tournament }: { tournament: Tournament }) {
                       </>
                     )}
 
-                    {/* Match 3 */}
+                    {/* Match 3 — FIX: toujours p1A/p1B, visible dès 1-1 */}
                     {showMatch3 && match3 && (
                       <>
                         <MatchLegRow
                           label="⚡ Match 3"
-                          playerA={match3.playerA}
-                          playerB={match3.playerB}
+                          playerA={match3.playerA ?? p1A}
+                          playerB={match3.playerB ?? p1B}
                           scoreA={match3.scoreA[0]}
                           scoreB={match3.scoreB[0]}
                           completed={match3.completed}

@@ -1,4 +1,4 @@
-// Storage utilities for TOURNEX - now with Supabase support
+// Storage utilities for cup - now with Supabase support
 import { supabase, getActiveTournament, getTournaments, getPlayers, getSetting, setSetting, upsertPlayer as supabaseUpsertPlayer } from './supabase';
 
 type StorageKey = 
@@ -70,7 +70,7 @@ const defaultData: StorageData = {
 export function getStorage<K extends StorageKey>(key: K): any {
   if (typeof window === 'undefined') return defaultData[key];
   try {
-    const item = localStorage.getItem(`tournex_${key}`);
+    const item = localStorage.getItem(`cup_${key}`);
     return item ? JSON.parse(item) : defaultData[key];
   } catch {
     return defaultData[key];
@@ -80,7 +80,7 @@ export function getStorage<K extends StorageKey>(key: K): any {
 export function setStorage<K extends StorageKey>(key: K, value: any): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(`tournex_${key}`, JSON.stringify(value));
+    localStorage.setItem(`cup_${key}`, JSON.stringify(value));
   } catch (error) {
     console.error('Storage error:', error);
   }
@@ -104,7 +104,7 @@ export function getAllStorage(): StorageData {
 export function resetAllStorage(): void {
   if (typeof window === 'undefined') return;
   Object.keys(defaultData).forEach((key) => {
-    localStorage.removeItem(`tournex_${key}`);
+    localStorage.removeItem(`cup_${key}`);
   });
 }
 

@@ -87,6 +87,19 @@ export default function PlayersPage() {
                   </div>
                   <div className="flex-1">
                     <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{player.name}</p>
+                    {(player as any).social_link && (
+                      <a
+                        href={(player as any).social_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs mt-0.5 inline-block"
+                        style={{ color: 'var(--gold)', textDecoration: 'none' }}
+                      >
+                        🔗 {(player as any).social_link
+                          .replace(/https?:\/\/(www\.)?/, '')
+                          .split('/')[0]}
+                      </a>
+                    )}
                   </div>
                   <div className="flex gap-4 text-right">
                     <div className="flex flex-col items-center">
