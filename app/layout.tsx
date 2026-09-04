@@ -8,7 +8,7 @@ import './globals.css'
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Blitzcup - International Tournament',
+  title: 'E-TOURNOI - International Tournament',
   description: 'Tournament management platform',
 };
 
